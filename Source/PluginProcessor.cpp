@@ -56,11 +56,24 @@ void MosaicProcessor::prepareToPlay (double sampleRate, int)
     renderedFrames = 0; hostFrames = 0; ringRead = 0;
     setLatencySamples (128);
     // the first state: whatever the page sent last, or Mosaic's defaults until it does
+    if (auto* p = pending.exchange (nullptr)) { if (live) delete retired.exchange (live.release()); live.reset (p); }
+    if (live && wavesRate != sr)
+    {
+        // TABLE's waves are built for one sample rate: rebuild them for this one
+        live->waves = lastWaves = mosaic::buildTableWaves (*wtBank, live->tableSettings, sr); lastWaveKey = waveKeyFor (live->tableSettings);
+        lastMotion.clear(); lastMotionKey.clear(); live->motion.clear(); live->motionKey.clear();
+        if (live->tableSettings.motion.on)
+        {
+            for (int i = 0; i <= 16; ++i) lastMotion[i] = mosaic::TableEngine::buildMotionFrame (*wtBank, live->tableSettings, i, sr);
+            live->motion = lastMotion; live->motionKey = lastMotionKey = mosaic::TableEngine::motionKeyFor (live->tableSettings);
+        }
+    }
+    wavesRate = sr;
     if (live && live->voice) voice.setState (live->voice);
     if (live && live->hasFx) { fx.apply (live->fx, 0); }
     else { mosaic::FxState d; d.reverbWet = 0.12; d.reverbDecay = 2.1; fx.apply (d, 0); }   // also loads the first impulse, before any audio
     fx.externalImpulses = true;
-    if (live) { table.applySettings (live->tableSettings, 0); if (live->waves) table.setWaves (live->waves, 0); }
+    if (live) { table.applySettings (live->tableSettings, 0); if (live->waves) table.setWaves (live->waves, 0); if (! live->motionKey.empty()) table.setMotionFrames (live->motion, live->motionKey); aOn = live->aOn; bOn = live->bOn; polyphony = live->polyphony; glideTime = live->glide; }
     lastDecay = mosaic::MosaicFx::decayFor (live && live->hasFx ? live->fx : mosaic::FxState());
 }
 
@@ -95,7 +108,7 @@ void MosaicProcessor::fromPage (const juce::var& list)
             juce::DynamicObject::Ptr ts = new juce::DynamicObject(); ts->setProperty ("name", m["name"]); ts->setProperty ("wtLab", m["wtLab"]);
             p->tableSettings = mosaic::TableEngine::parseSettings (toValue (juce::var (ts.get())), *wtBank);
             const auto key = waveKeyFor (p->tableSettings);
-            if (key != lastWaveKey || ! lastWaves) { lastWaves = mosaic::buildTableWaves (*wtBank, p->tableSettings, sr); lastWaveKey = key; p->waves = lastWaves; }
+            if (key != lastWaveKey || ! lastWaves || wavesRate != sr) { wavesRate = sr; lastWaves = mosaic::buildTableWaves (*wtBank, p->tableSettings, sr); lastWaveKey = key; p->waves = lastWaves; }
             if (p->tableSettings.motion.on)
             {
                 const auto mk = mosaic::TableEngine::motionKeyFor (p->tableSettings);

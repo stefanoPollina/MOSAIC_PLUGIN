@@ -79,7 +79,7 @@ private:
     };
     std::atomic<Pack*> pending { nullptr }, retired { nullptr };
     std::unique_ptr<Pack> live;            // owned by the audio thread once installed
-    std::string lastWaveKey, lastMotionKey; double lastDecay = -1; std::shared_ptr<mosaic::TableWaves> lastWaves;
+    std::string lastWaveKey, lastMotionKey; double lastDecay = -1, wavesRate = 0; std::shared_ptr<mosaic::TableWaves> lastWaves;
     std::map<int, std::shared_ptr<mosaic::TableWaves>> lastMotion;
 
     // timed messages, message thread → audio thread
