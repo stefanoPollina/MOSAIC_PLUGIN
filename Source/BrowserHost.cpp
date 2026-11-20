@@ -23,10 +23,34 @@ BrowserHost::BrowserHost (MosaicProcessor& p) : proc (p)
         .withEventListener ("save", [this] (const juce::var& v)
         {
             // Mosaic's exports (WAV, MIDI, presets, banks): a save dialog instead of a browser download
-            const auto name = v["name"].toString(); juce::MemoryBlock data; data.fromBase64Encoding (v["data"].toString());
+            const auto name = v["name"].toString(); juce::MemoryOutputStream mo; juce::Base64::convertFromBase64 (mo, v["data"].toString()); const auto data = mo.getMemoryBlock();
             chooser = std::make_unique<juce::FileChooser> ("Save " + name, juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (name));
             chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
                                   [data] (const juce::FileChooser& fc) { auto f = fc.getResult(); if (f != juce::File{}) f.replaceWithData (data.getData(), data.getSize()); });
+        })
+        .withEventListener ("open", [this] (const juce::var& v)
+        {
+            // Mosaic's imports: a native open dialog; the file goes back to the page's <input>
+            const int id = (int) v["id"]; juce::StringArray pats;
+            for (auto a : juce::StringArray::fromTokens (v["accept"].toString(), ",", ""))
+                if ((a = a.trim()).startsWithChar ('.')) pats.addIfNotAlreadyThere ("*" + a);
+                else if (a == "application/json") pats.addIfNotAlreadyThere ("*.json");
+                else if (a.startsWith ("audio/")) for (auto e : { "*.wav", "*.aif", "*.aiff", "*.flac", "*.mp3", "*.ogg" }) pats.addIfNotAlreadyThere (e);
+            auto flags = juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles;
+            if ((bool) v["multiple"]) flags |= juce::FileBrowserComponent::canSelectMultipleItems;
+            chooser = std::make_unique<juce::FileChooser> ("Open", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), pats.joinIntoString (";"));
+            chooser->launchAsync (flags, [this, id] (const juce::FileChooser& fc)
+            {
+                juce::Array<juce::var> files;
+                for (const auto& f : fc.getResults())
+                {
+                    juce::MemoryBlock mb; if (! f.loadFileAsData (mb)) continue;
+                    auto* o = new juce::DynamicObject(); o->setProperty ("name", f.getFileName()); o->setProperty ("data", juce::Base64::toBase64 (mb.getData(), mb.getSize()));
+                    files.add (juce::var (o));
+                }
+                auto* r = new juce::DynamicObject(); r->setProperty ("id", id); r->setProperty ("files", files);
+                web->emitEventIfBrowserIsVisible ("opened", juce::var (r));
+            });
         });
     web = std::make_unique<juce::WebBrowserComponent> (options);
     web->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());

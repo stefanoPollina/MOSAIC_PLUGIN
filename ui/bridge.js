@@ -29,6 +29,28 @@
     }
     return realClick.call(this);
   };
+  // imports (presets, user banks, .hlx, audio, wavetables): a native open dialog, since the page's own file picker
+  // does not open reliably inside a host; the chosen file goes back into the same <input> as if picked there
+  const realInputClick = HTMLInputElement.prototype.click, opening = new Map(); let openId = 0;
+  HTMLInputElement.prototype.click = function () {
+    if (this.type !== 'file') return realInputClick.call(this);
+    const id = ++openId; opening.set(id, this);
+    J.emitEvent('open', { id, accept: this.accept || '', multiple: !!this.multiple });
+  };
+  J.addEventListener('opened', (r) => {
+    const input = opening.get(r.id); opening.delete(r.id);
+    if (!input || !r.files || !r.files.length) return;
+    try {
+      const dt = new DataTransfer();
+      r.files.forEach((f) => {
+        const bin = atob(f.data), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        dt.items.add(new File([u8], f.name, { type: /\.json$/i.test(f.name) ? 'application/json' : '' }));
+      });
+      input.files = dt.files;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (e) { console.error(e); }
+  });
 
   /* ---------- the plugin's audio clock ---------- */
   let clk = { t: 0, sr: 48000, offline: false, wall: performance.now() };
