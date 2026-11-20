@@ -219,7 +219,17 @@
     const ahead = Math.max(0, now() + 0.015 - t.time) / beat;
     const k = Math.ceil((t.ppq + ahead) / div - 1e-9);
     seq.next = t.time + (k * div - t.ppq) * beat; seq.step = ((k % len) + len) % len;
-    e.l8anchor = t.time - t.ppq * beat; send({ type: 'clock', anchor: e.l8anchor });
+    setLfoAnchor(t, beat, force === 'start');
+  };
+  // LFO SEQ and the LFO step sequencers count from this anchor. It starts on the DAW's bar line at play, but a loop
+  // jump or relocate must not restart them: a pattern longer than the DAW's loop has to keep running through all its
+  // steps. So the anchor only moves when it is no longer on the DAW's bar grid (play from a stop, a tempo change).
+  let lfoBpm = 0;
+  const setLfoAnchor = (t, beat, restart) => {
+    const e = MP.engine, want = t.time - t.ppq * beat, bar = 4 * beat, have = e.l8anchor || 0;
+    const d = (want - have) / bar, onGrid = Math.abs(d - Math.round(d)) * bar < 0.004;
+    if (!restart && onGrid && lfoBpm === t.bpm) return;
+    lfoBpm = t.bpm; e.l8anchor = want; send({ type: 'clock', anchor: want });
   };
   J.addEventListener('transport', (t) => {
     const st = window.MosaicBank && window.MosaicBank.getState(), seq = window.__mosaicSequencer, e = MP.engine;
@@ -228,7 +238,7 @@
     if (!seq || !t.hasTransport) return;
     if (t.playing && !hostPlaying) {
       seq.start();
-      setTimeout(() => { if (seq.playing) lockTo(t, st, seq, e, true); }, 0);
+      setTimeout(() => { if (seq.playing) lockTo(t, st, seq, e, 'start'); }, 0);
     } else if (t.playing && seq.playing) {
       lockTo(t, st, seq, e, t.ppq < lastPpq - 1e-6);   // a jump backwards (loop or relocate): resync at once
     } else if (!t.playing && hostPlaying) seq.stop();
