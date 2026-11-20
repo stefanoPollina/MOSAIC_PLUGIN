@@ -186,22 +186,35 @@
   setInterval(() => { const a = arpOn(); if (a !== lastArp) { lastArp = a; send({ type: 'arp', on: a }); } }, 100);
 
   /* ---------- the DAW's transport: tempo, play and stop, and offline renders ---------- */
-  let hostPlaying = false;
+  // Mosaic's sequencer is started on the DAW's step grid and then kept locked to it: tempo changes, loop jumps and
+  // repositioning are followed, not just the first play.
+  let hostPlaying = false, lastPpq = 0;
+  const lockTo = (t, st, seq, e, force) => {
+    const div = Number(st.seq.division || 0.25), beat = 60 / (st.seq.bpm || 120), len = st.seq.length || 16;
+    if (!force && seq.step % 2 === 0) {
+      // where the next unscheduled step sits on the DAW's grid (even steps fall exactly on it, with or without swing)
+      const r = (t.ppq + (seq.next - t.time) / beat) / div, k = Math.round(r);
+      const off = Math.abs(r - k) * div * beat, stepOk = ((k % len) + len) % len === seq.step;
+      if (off < 0.004 && stepOk) return;
+    }
+    // the first grid step not yet due
+    const ahead = Math.max(0, now() + 0.015 - t.time) / beat;
+    const k = Math.ceil((t.ppq + ahead) / div - 1e-9);
+    seq.next = t.time + (k * div - t.ppq) * beat; seq.step = ((k % len) + len) % len;
+    e.l8anchor = t.time - t.ppq * beat; send({ type: 'clock', anchor: e.l8anchor });
+  };
   J.addEventListener('transport', (t) => {
     const st = window.MosaicBank && window.MosaicBank.getState(), seq = window.__mosaicSequencer, e = MP.engine;
     if (!st || !e) return;
     if (t.hasTempo && t.bpm > 0 && Math.abs((st.seq.bpm || 120) - t.bpm) > 1e-6) { st.seq.bpm = t.bpm; e.setState(st); if (MP.onTempo) MP.onTempo(t.bpm); }
     if (!seq || !t.hasTransport) return;
     if (t.playing && !hostPlaying) {
-      // start on the DAW's step grid: the next step boundary after the play position
-      const div = Number(st.seq.division || 0.25), beat = 60 / (st.seq.bpm || 120), pos = Math.max(0, t.ppq), k = Math.ceil(pos / div - 1e-9);
       seq.start();
-      setTimeout(() => {
-        seq.next = t.time + (k * div - pos) * beat; seq.step = ((k % st.seq.length) + st.seq.length) % st.seq.length;
-        e.l8anchor = seq.next - seq.step * div * beat; send({ type: 'clock', anchor: e.l8anchor });
-      }, 0);
+      setTimeout(() => { if (seq.playing) lockTo(t, st, seq, e, true); }, 0);
+    } else if (t.playing && seq.playing) {
+      lockTo(t, st, seq, e, t.ppq < lastPpq - 1e-6);   // a jump backwards (loop or relocate): resync at once
     } else if (!t.playing && hostPlaying) seq.stop();
-    hostPlaying = t.playing;
+    hostPlaying = t.playing; lastPpq = t.ppq;
   });
   // offline (faster than real time) render: the plugin waits until the sequencer has scheduled up to `until`
   J.addEventListener('pump', (p) => {
@@ -216,7 +229,7 @@
     if (b) { b.click(); J.emitEvent('ready', {}); return; }
     setTimeout(autoStart, 200);
   };
-  window.addEventListener('load', () => setTimeout(autoStart, 50));
+  window.addEventListener('load', () => { J.emitEvent('ready', {}); setTimeout(autoStart, 50); });
 })();
 
 </script>
