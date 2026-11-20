@@ -85,7 +85,7 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     master.init (1);
 }
 
-void MosaicFx::loadImpulse (double seconds)
+juce::AudioBuffer<float> MosaicFx::makeImpulse (double sr, double seconds, const std::function<double()>& random)
 {
     const int length = std::max (1, (int) std::floor (sr * seconds));
     juce::AudioBuffer<float> ir (2, length);
@@ -95,15 +95,27 @@ void MosaicFx::loadImpulse (double seconds)
         for (int i = 0; i < length; ++i)
         {
             const double t = (double) i / length, env = std::pow (1 - t, 1.6) * std::exp (-2.4 * t), early = i < sr * 0.03 ? 0.4 : 1;
-            d[i] = (float) ((irRandom() * 2 - 1) * env * early * 0.55);
+            d[i] = (float) ((random() * 2 - 1) * env * early * 0.55);
         }
     }
     // ConvolverNode normalisation (Chrome): 1/RMS × 10^(-58/20) × 44100/sampleRate
     double power = 0;
-    for (int c = 0; c < 2; ++c) for (int i = 0; i < length; ++i) { const double s = ir.getSample (c, i); power += s * s; }
+    for (int c = 0; c < 2; ++c) for (int i = 0; i < length; ++i) { const double v = ir.getSample (c, i); power += v * v; }
     power = std::sqrt (power / (2.0 * length));
     if (! std::isfinite (power) || power < 0.000125) power = 0.000125;
     ir.applyGain ((float) (1 / power * std::pow (10.0, -58.0 / 20) * (44100.0 / sr)));
+    return ir;
+}
+
+void MosaicFx::installImpulse (juce::AudioBuffer<float>&& ir, double seconds)
+{
+    conv.loadImpulseResponse (std::move (ir), sr, juce::dsp::Convolution::Stereo::yes, juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
+    reverbSeconds = seconds;
+}
+
+void MosaicFx::loadImpulse (double seconds)
+{
+    juce::AudioBuffer<float> ir = makeImpulse (sr, seconds, irRandom); const int length = ir.getNumSamples();
     const bool first = reverbSeconds <= 0;
     conv.loadImpulseResponse (std::move (ir), sr, juce::dsp::Convolution::Stereo::yes, juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
     reverbSeconds = seconds;
@@ -199,7 +211,7 @@ void MosaicFx::apply (const FxState& f, double now)
     for (auto& b : multi) { setTarget (b.time, std::min (2.2, std::max (0.02, f.multiTime * b.scale))); setTarget (b.fb, f.multiOn ? std::min (0.8, std::max (0.0, f.multiFb)) : 0); }
     setTarget (reverbWet, std::max (0.0, f.reverbWet));
     const double decay = std::min (6.0, std::max (0.4, f.reverbDecay));
-    if (std::abs (decay - reverbSeconds) > 0.25) loadImpulse (decay);
+    if (! externalImpulses && std::abs (decay - reverbSeconds) > 0.25) loadImpulse (decay);
     const double air = f.shimmerOn && f.shimmerMode != "air" ? f.shimmerLevel : 0;
     const double pitch = f.shimmerPitch; const double mul[3] = { 1, 1.5, 2.01 }, lv[3] = { 0.08, 0.035, 0.02 };
     for (int i = 0; i < 3; ++i) { setTarget (shFreq[(size_t) i], pitch * mul[i]); setTarget (shGain[(size_t) i], air * lv[i]); }

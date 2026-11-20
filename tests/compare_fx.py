@@ -74,7 +74,7 @@ with sync_playwright() as p:
         c = np.fromfile('/tmp/mzfx/c.raw', dtype=np.float32).reshape(-1, 2)
         # Chrome's own render of the AIR loop (a feedback cycle through the convolver) is not repeatable from one render to the next,
         # so for AIR the C++ is held to the closer of two browser renders.
-        tries = 2 if st['fx'].get('shimmerOn') and st['fx'].get('shimmerMode') == 'air' else 1
+        tries = 3 if st['fx'].get('shimmerOn') and st['fx'].get('shimmerMode') == 'air' else 1
         best = None
         for _ in range(tries):
             js = np.frombuffer(base64.b64decode(pg.evaluate('([s,t,d]) => render(s,t,d)', [st, SECS, seed])), dtype=np.float32).reshape(-1, 2)

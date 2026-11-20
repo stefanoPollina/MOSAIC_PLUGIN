@@ -37,6 +37,11 @@ public:
     void setBank (std::shared_ptr<const wt::Bank> b) { bank = std::move (b); }
     // the page's hooks.state: reads state.wtLab (or the starter preset named like the state) into the settings
     void setState (const json::Value& state, double now);
+    static TableSettings parseSettings (const json::Value& state, const wt::Bank& bank);   // any thread
+    void applySettings (const TableSettings& s, double now);                                // audio thread
+    void setMotionFrames (std::map<int, std::shared_ptr<TableWaves>> f, const std::string& key) { motionFrames = std::move (f); motionKey = key; }
+    static std::string motionKeyFor (const TableSettings& s);
+    static std::shared_ptr<TableWaves> buildMotionFrame (const wt::Bank& bank, const TableSettings& s, int idx, double sampleRate);
     const TableSettings& settings() const { return S; }
     std::string waveKey() const;                        // changes when the waves must be rebuilt
     void setWaves (std::shared_ptr<TableWaves> w, double now);   // install new waves (crossfading sounding voices, as swapWaves)

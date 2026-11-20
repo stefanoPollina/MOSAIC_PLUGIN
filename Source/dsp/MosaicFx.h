@@ -37,6 +37,11 @@ public:
     void setGate (double value, double time, bool cancel);
     void process (float* L, float* R, int n, double now);   // n <= 128
     void loadImpulse (double seconds);
+    // the plugin builds new impulses off the audio thread and hands them in (JUCE loads and crossfades them in the background)
+    bool externalImpulses = false;
+    static juce::AudioBuffer<float> makeImpulse (double sampleRate, double seconds, const std::function<double()>& random);
+    void installImpulse (juce::AudioBuffer<float>&& ir, double seconds);
+    static double decayFor (const FxState& f) { return std::min (6.0, std::max (0.4, f.reverbDecay)); }
     void setImpulseRng (std::function<double()> r) { irRandom = std::move (r); }
     bool testNoFxGating = false;
     void testForce (const std::string& name, double v);   // parity tests: pin one parameter to a value at once                       // parity tests: keep idle effects connected (browser timers don't fire in offline renders)

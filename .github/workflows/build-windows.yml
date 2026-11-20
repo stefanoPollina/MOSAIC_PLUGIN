@@ -1,0 +1,60 @@
+name: Build Mosaic for Windows
+
+# Every push builds Mosaic (VST3 + standalone) and an installer on GitHub's Windows machines and, on main,
+# publishes them as a Release anyone can download without signing in:
+#   https://github.com/stefanoPollina/MOSAIC_PLUGIN/releases/latest
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (downloads JUCE and the WebView2 SDK)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Mosaic
+        run: cmake --build build --config Release --target MOSAIC_VST3 MOSAIC_Standalone --parallel
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MOSAIC VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$v.$env:GITHUB_RUN_NUMBER" installer\mosaic.iss
+
+      - name: Collect the downloads
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item installer\Output\*.exe dist\
+          Copy-Item build\MOSAIC_artefacts\Release\Standalone\Mosaic.exe dist\
+          Copy-Item -Recurse "build\MOSAIC_artefacts\Release\VST3\Mosaic.vst3" dist\
+          Get-ChildItem dist
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mosaic-windows
+          path: dist/
+
+      - name: Publish a Release (direct, public download links)
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MOSAIC VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          $ver = "$v.$env:GITHUB_RUN_NUMBER"
+          New-Item -ItemType Directory -Force rel | Out-Null
+          Copy-Item (Get-ChildItem installer\Output\*.exe | Select-Object -First 1).FullName rel\Mosaic-Windows-Setup.exe
+          Compress-Archive -Path dist\Mosaic.exe, dist\Mosaic.vst3 -DestinationPath rel\Mosaic-Windows-Plugins.zip
+          $notes = "Mosaic $ver for Windows.`n`n- **Mosaic-Windows-Setup.exe**: the installer (VST3 + standalone). Close your DAW first, then rescan plugins.`n- **Mosaic-Windows-Plugins.zip**: the same files to copy by hand (the VST3 goes in C:\Program Files\Common Files\VST3).`n`nBuilt from $env:GITHUB_SHA."
+          gh release create "v$ver" rel\Mosaic-Windows-Setup.exe rel\Mosaic-Windows-Plugins.zip --title "Mosaic $ver" --notes $notes --latest --target $env:GITHUB_SHA

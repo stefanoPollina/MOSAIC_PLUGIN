@@ -1,7 +1,10 @@
 #include "TableEngine.h"
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 namespace mosaic
 {
@@ -114,16 +117,14 @@ std::vector<std::string> TableEngine::starterNames() const
     std::vector<std::string> n; if (bank) for (auto& t : bank->json["tables"].arr) n.push_back ("WT " + t["name"].str); return n;
 }
 
-void TableEngine::setState (const Value& state, double now)
+TableSettings TableEngine::parseSettings (const Value& state, const wt::Bank& bk)
 {
-    if (! state.isObject() || ! bank) return;
+    TableSettings n; if (! state.isObject()) return n;
     std::string name = state["name"].type == Value::String ? state["name"].str : "";
     { const size_t p = name.rfind (" \xC2\xB7 "); if (p != std::string::npos) { bool ok = p + 4 < name.size(); for (size_t i = p + 4; i < name.size(); ++i) { const char c = name[i]; if (! (std::isalpha ((unsigned char) c) || c == ' ')) ok = false; } if (ok) name = name.substr (0, p); } }
-    const Value* starter = nullptr; for (auto& t : bank->json["tables"].arr) if ("WT " + t["name"].str == name) { starter = &t; break; }
-    const bool oldOn = S.on; const std::string oldRoute = S.follow, oldMode = S.mode;
-    const double oldLevel = S.level, oldCut = S.cutoff, oldRes = S.res, oldFm = S.fmDepth;
+    const Value* starter = nullptr; for (auto& t : bk.json["tables"].arr) if ("WT " + t["name"].str == name) { starter = &t; break; }
     // Object.assign(S, D, cfg): cfg is state.wtLab, or the starter preset this state is named after, or "off"
-    TableSettings n; const Value& w = state["wtLab"];
+    const Value& w = state["wtLab"];
     if (w.isObject())
     {
         auto num = [&] (const char* k, double& dst) { const Value& x = w[k]; if (x.type == Value::Number) dst = x.num; else if (x.type == Value::Bool) dst = x.b; else if (x.type == Value::String) dst = std::strtod (x.str.c_str(), nullptr); };
@@ -141,14 +142,23 @@ void TableEngine::setState (const Value& state, double now)
     n.scan = unit (n.scan); n.M1 = unit (n.M1); n.M2 = unit (n.M2); n.M3 = unit (n.M3); n.M4 = unit (n.M4); n.level = unit (n.level); n.fmDepth = unit (n.fmDepth);
     n.selfFm = unit (n.selfFm); n.fmRatio = clampd ((n.fmRatio != n.fmRatio || n.fmRatio == 0) ? 2 : n.fmRatio, .5, 16);
     n.unison = std::max (1, std::min (7, n.unison == 0 ? 1 : n.unison));
-    if (! bank->find (n.table)) n.table = "WT17";
+    if (! bk.find (n.table)) n.table = "WT17";
     if (! (n.follow == "AUTO" || n.follow == "A" || n.follow == "B" || n.follow == "A+B")) n.follow = "A";
     if (! (n.mode == "replace" || n.mode == "blend")) n.mode = "replace";
     n.poly = 12;
+    return n;
+}
+
+void TableEngine::applySettings (const TableSettings& n, double now)
+{
+    const bool oldOn = S.on; const std::string oldRoute = S.follow, oldMode = S.mode;
+    const double oldLevel = S.level, oldCut = S.cutoff, oldRes = S.res, oldFm = S.fmDepth;
     S = n;
     if ((oldOn && ! S.on) || oldRoute != S.follow || oldMode != S.mode) panic (now);
     if (oldLevel != S.level || oldCut != S.cutoff || oldRes != S.res || oldFm != S.fmDepth) applyLive (now);
 }
+
+void TableEngine::setState (const Value& state, double now) { if (bank) applySettings (parseSettings (state, *bank), now); }
 
 bool TableEngine::follows (const std::string& lay, bool aOn) const
 {
@@ -312,18 +322,29 @@ bool TableEngine::usesScan() const
     return false;
 }
 
+std::string TableEngine::motionKeyFor (const TableSettings& s)
+{
+    char b[200]; std::snprintf (b, sizeof b, "%s|%.17g|%.17g|%.17g|%.17g", s.table.c_str(), s.M1, s.M2, s.M3, s.M4); return b;
+}
+
+std::shared_ptr<TableWaves> TableEngine::buildMotionFrame (const wt::Bank& bk, const TableSettings& s, int idx, double sampleRate)
+{
+    // one full-band wave per scan step (the browser band-limits it per pitch)
+    auto w = std::make_shared<TableWaves>(); const Value* def = bk.find (s.table); if (! def) return nullptr;
+    wt::Macros mv; mv.given = true; mv.M1 = s.M1; mv.M2 = s.M2; mv.M3 = s.M3; mv.M4 = s.M4;
+    const auto st = wt::renderStereo (*def, idx / 16.0, bk, mv); std::vector<float> re, im;
+    wt::waveCoefficients (st.L, 512, re, im); w->L[0] = waveFrom (re, im, 512, sampleRate);
+    if (! st.same) { wt::waveCoefficients (st.R, 512, re, im); w->R[0] = waveFrom (re, im, 512, sampleRate); w->stereo = true; } else w->R[0] = w->L[0];
+    return w;
+}
+
 std::shared_ptr<TableWaves> TableEngine::frameWave (int idx)
 {
-    const std::string key = S.table + "|" + std::to_string (S.M1) + std::to_string (S.M2) + std::to_string (S.M3) + std::to_string (S.M4);
+    const std::string key = motionKeyFor (S);
     if (key != motionKey) { motionFrames.clear(); motionKey = key; }
     auto it = motionFrames.find (idx); if (it != motionFrames.end()) return it->second;
-    // one full-band wave per scan step (the browser band-limits it per pitch); built on first use
-    auto w = std::make_shared<TableWaves>(); const Value* def = bank->find (S.table); if (! def) return nullptr;
-    wt::Macros mv; mv.given = true; mv.M1 = S.M1; mv.M2 = S.M2; mv.M3 = S.M3; mv.M4 = S.M4;
-    const auto st = wt::renderStereo (*def, idx / 16.0, *bank, mv); std::vector<float> re, im;
-    wt::waveCoefficients (st.L, 512, re, im); w->L[0] = waveFrom (re, im, 512, sr);
-    if (! st.same) { wt::waveCoefficients (st.R, 512, re, im); w->R[0] = waveFrom (re, im, 512, sr); w->stereo = true; } else w->R[0] = w->L[0];
-    motionFrames[idx] = w; return w;
+    auto w = bank ? buildMotionFrame (*bank, S, idx, sr) : nullptr;   // the plugin builds these ahead, off the audio thread
+    if (w) motionFrames[idx] = w; return w;
 }
 
 void TableEngine::motionTick (double now, double horizon)
@@ -344,7 +365,7 @@ void TableEngine::motionTick (double now, double horizon)
                 if (idx != v.frame)
                 {
                     if (now < v.xEnd) break;
-                    auto fw = frameWave (idx); const double fade = std::max (.004, std::min (dur * .9, S.motion.slew * dur)); const int side = 1 - v.pairSide;
+                    auto fw = frameWave (idx); if (! fw) break; const double fade = std::max (.004, std::min (dur * .9, S.motion.slew * dur)); const int side = 1 - v.pairSide;
                     for (auto& p : v.pairs)
                     {
                         p.wave[(size_t) side] = p.right && fw->stereo ? fw->R[0] : fw->L[0];
