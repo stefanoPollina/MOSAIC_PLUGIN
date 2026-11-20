@@ -46,7 +46,8 @@ public:
     void setUiState (const juce::String& json);          // the full Mosaic state, saved with the project
     juce::String getUiState() const { const std::lock_guard<std::mutex> l (uiLock); return uiState; }
     std::atomic<int> stateVersion { 0 };                 // bumped when the host restores a project
-    BrowserHost& browserHost();                          // the page, alive while the plugin exists
+    void setHost (BrowserHost* b) { const juce::SpinLock::ScopedLockType l (hostLock); host = b; }   // the editor's page, while the window is open
+    void applyFullState (const juce::String& json);      // a whole Mosaic state (a saved project): the engines take it without the page
 
     // ---- to the page (read by the BrowserHost timer, message thread) ----
     struct Meter { int voices = 0; float cpu = 0; std::array<float, 160> scope {}; };
@@ -114,7 +115,8 @@ private:
     float recPeak = 0; double recSq = 0; int recN = 0; std::atomic<bool> recMeterFlag { false }; std::atomic<float> recMeterPeak { 0 }, recMeterRms { 0 };
 
     mutable std::mutex uiLock; juce::String uiState;
-    std::unique_ptr<BrowserHost> host;
+    BrowserHost* host = nullptr; juce::SpinLock hostLock;
+    void installState (const juce::var& m);
     juce::Random irRandom;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MosaicProcessor)
 };

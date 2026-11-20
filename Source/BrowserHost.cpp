@@ -4,10 +4,6 @@
 
 BrowserHost::BrowserHost (MosaicProcessor& p) : proc (p)
 {
-   #if JUCE_WINDOWS
-    // the page must keep its timers running at full rate while the window is closed (sequencer, BANK, MOTION)
-    _putenv_s ("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows");
-   #endif
     using Opts = juce::WebBrowserComponent::Options;
     auto options = Opts{}
         .withBackend (Opts::Backend::webview2)
@@ -17,6 +13,7 @@ BrowserHost::BrowserHost (MosaicProcessor& p) : proc (p)
                                      .withBackgroundColour (juce::Colour (0xff0d0e10))
                                      .withStatusBarDisabled())
         .withNativeIntegrationEnabled()
+        .withInitialisationData ("mosaicState", p.getUiState())
         .withKeepPageLoadedWhenBrowserIsHidden()
         .withResourceProvider ([this] (const juce::String& url) { return resource (url); })
         .withEventListener ("ready", [this] (const juce::var&) { pageReady = true; })
@@ -32,27 +29,17 @@ BrowserHost::BrowserHost (MosaicProcessor& p) : proc (p)
                                   [data] (const juce::FileChooser& fc) { auto f = fc.getResult(); if (f != juce::File{}) f.replaceWithData (data.getData(), data.getSize()); });
         });
     web = std::make_unique<juce::WebBrowserComponent> (options);
-    // parked in a window far off screen (no taskbar entry), so the page runs as if shown while the editor is closed
-    parking = std::make_unique<juce::Component>();
-    parking->setSize (1280, 860);
-    parking->addAndMakeVisible (*web); web->setBounds (parking->getLocalBounds());
-    parking->addToDesktop (juce::ComponentPeer::windowIsTemporary);
-    parking->setTopLeftPosition (-30000, -30000); parking->setVisible (true);
     web->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
     startTimerHz (60);
 }
 
-BrowserHost::~BrowserHost() { stopTimer(); cancelPendingUpdate(); web.reset(); parking.reset(); }
-
-void BrowserHost::attachTo (juce::Component* editor)
-{
-    if (editor) { editor->addAndMakeVisible (*web); web->setBounds (editor->getLocalBounds()); }
-    else { parking->addAndMakeVisible (*web); web->setBounds (parking->getLocalBounds()); }
-}
+BrowserHost::~BrowserHost() { stopTimer(); cancelPendingUpdate(); web.reset(); }
 
 void BrowserHost::restoreFromProcessor()
 {
-    juce::MessageManager::callAsync ([this] { pageReady = false; web->goToURL (juce::WebBrowserComponent::getResourceProviderRoot()); });
+    // the page swaps in the project's state and reloads itself
+    auto* o = new juce::DynamicObject(); o->setProperty ("state", proc.getUiState());
+    pageReady = false; web->emitEventIfBrowserIsVisible ("restore", juce::var (o));
 }
 
 std::optional<juce::WebBrowserComponent::Resource> BrowserHost::resource (const juce::String& url)
@@ -61,7 +48,6 @@ std::optional<juce::WebBrowserComponent::Resource> BrowserHost::resource (const 
     juce::WebBrowserComponent::Resource r;
     auto bytes = [&r] (const void* d, size_t n, const char* mime) { r.data.resize (n); std::memcpy (r.data.data(), d, n); r.mimeType = mime; };
     if (path == "/" || path == "/index.html") { bytes (BinaryData::index_html, (size_t) BinaryData::index_htmlSize, "text/html"); return r; }
-    if (path == "/__mosaic_state") { const auto s = proc.getUiState().toStdString(); bytes (s.data(), s.size(), "application/json"); return r; }
     return std::nullopt;
 }
 

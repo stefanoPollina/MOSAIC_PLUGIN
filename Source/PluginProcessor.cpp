@@ -28,17 +28,14 @@ MosaicProcessor::MosaicProcessor()
     table.setBank (wtBank);
     outBuf.assign ((size_t) outFifo.getTotalSize() * 2, 0.f);
     recBuf.assign ((size_t) recFifo.getTotalSize() * 2, 0.f);
-    host = std::make_unique<BrowserHost> (*this);
 }
 
 MosaicProcessor::~MosaicProcessor()
 {
-    host.reset();
     delete pending.exchange (nullptr);
     delete retired.exchange (nullptr);
 }
 
-BrowserHost& MosaicProcessor::browserHost() { return *host; }
 
 bool MosaicProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 {
@@ -84,53 +81,71 @@ void MosaicProcessor::push (const Msg& m)
     if (w.blockSize1 > 0) q[(size_t) w.startIndex1] = m; else if (w.blockSize2 > 0) q[(size_t) w.startIndex2] = m;
 }
 
+void MosaicProcessor::installState (const juce::var& m)
+{
+    auto* p = new Pack();
+    const Value slim = toValue (m["slim"]);
+    p->voice = std::make_shared<mosaic::State> (mosaic::stateFromJson (slim));
+    bendRange = slim["bendRange"].orNum (2);
+    juce::DynamicObject::Ptr full = new juce::DynamicObject(), seq = new juce::DynamicObject();
+    full->setProperty ("fx", m["fx"]); full->setProperty ("master", m["master"]); seq->setProperty ("bpm", m["bpm"]); full->setProperty ("seq", juce::var (seq.get()));
+    p->fx = mosaic::FxState::fromJson (toValue (juce::var (full.get()))); p->hasFx = true;
+    const double decay = mosaic::MosaicFx::decayFor (p->fx);
+    if (std::abs (decay - lastDecay) > 0.25)
+    {
+        p->impulse = mosaic::MosaicFx::makeImpulse (sr, decay, [this] { return irRandom.nextDouble(); });
+        p->impulseSeconds = decay; p->hasImpulse = true; lastDecay = decay;
+    }
+    juce::DynamicObject::Ptr ts = new juce::DynamicObject(); ts->setProperty ("name", m["name"]); ts->setProperty ("wtLab", m["wtLab"]);
+    p->tableSettings = mosaic::TableEngine::parseSettings (toValue (juce::var (ts.get())), *wtBank);
+    const auto key = waveKeyFor (p->tableSettings);
+    if (key != lastWaveKey || ! lastWaves || wavesRate != sr) { wavesRate = sr; lastWaves = mosaic::buildTableWaves (*wtBank, p->tableSettings, sr); lastWaveKey = key; p->waves = lastWaves; }
+    if (p->tableSettings.motion.on)
+    {
+        const auto mk = mosaic::TableEngine::motionKeyFor (p->tableSettings);
+        if (mk != lastMotionKey)
+        {
+            lastMotion.clear();
+            for (int i = 0; i <= 16; ++i) lastMotion[i] = mosaic::TableEngine::buildMotionFrame (*wtBank, p->tableSettings, i, sr);
+            lastMotionKey = mk; p->motion = lastMotion; p->motionKey = mk;
+        }
+    }
+    p->aOn = (bool) m["aOn"]; p->bOn = (bool) m["bOn"]; p->polyphony = juce::jmax (1, (int) m["polyphony"]); p->glide = (double) m["glide"];
+    if (auto* old = pending.exchange (p))
+    {
+        // not installed yet: keep what it carried that this one does not repeat
+        if (! p->waves && old->waves) p->waves = old->waves;
+        if (! p->hasImpulse && old->hasImpulse) { p->impulse = std::move (old->impulse); p->impulseSeconds = old->impulseSeconds; p->hasImpulse = true; }
+        if (p->motionKey.empty() && ! old->motionKey.empty()) { p->motion = old->motion; p->motionKey = old->motionKey; }
+        delete old;
+    }
+    delete retired.exchange (nullptr);
+}
+
+void MosaicProcessor::applyFullState (const juce::String& json)
+{
+    // what the page's Engine.setState sends, built here from a saved state
+    const auto s = juce::JSON::parse (json); if (! s.isObject()) return;
+    juce::DynamicObject::Ptr slim = new juce::DynamicObject(), m = new juce::DynamicObject();
+    for (auto* k : { "bendRange", "detune", "unison", "lfo", "mod", "layers", "lfoSeq", "lfoB" }) if (s.hasProperty (k)) slim->setProperty (k, s[k]);
+    const auto bpm = s["seq"].isObject() && (double) s["seq"]["bpm"] > 0 ? (double) s["seq"]["bpm"] : 120.0;
+    slim->setProperty ("bpm", bpm);
+    const auto& L = s["layers"];
+    m->setProperty ("type", "state"); m->setProperty ("slim", juce::var (slim.get())); m->setProperty ("fx", s["fx"]); m->setProperty ("master", s["master"]);
+    m->setProperty ("bpm", bpm); m->setProperty ("name", s["name"]); m->setProperty ("wtLab", s["wtLab"]);
+    m->setProperty ("aOn", ! (L["A"].isObject() && L["A"]["enabled"].isBool() && ! (bool) L["A"]["enabled"]));
+    m->setProperty ("bOn", ! (L["B"].isObject() && L["B"]["enabled"].isBool() && ! (bool) L["B"]["enabled"]));
+    m->setProperty ("polyphony", s.hasProperty ("polyphony") ? s["polyphony"] : juce::var (8)); m->setProperty ("glide", s.hasProperty ("glide") ? s["glide"] : juce::var (0));
+    installState (juce::var (m.get()));
+}
+
 void MosaicProcessor::fromPage (const juce::var& list)
 {
     if (! list.isArray()) return;
     for (auto& m : *list.getArray())
     {
         const auto type = m["type"].toString();
-        if (type == "state")
-        {
-            auto* p = new Pack();
-            const Value slim = toValue (m["slim"]);
-            p->voice = std::make_shared<mosaic::State> (mosaic::stateFromJson (slim));
-            bendRange = slim["bendRange"].orNum (2);
-            juce::DynamicObject::Ptr full = new juce::DynamicObject(), seq = new juce::DynamicObject();
-            full->setProperty ("fx", m["fx"]); full->setProperty ("master", m["master"]); seq->setProperty ("bpm", m["bpm"]); full->setProperty ("seq", juce::var (seq.get()));
-            p->fx = mosaic::FxState::fromJson (toValue (juce::var (full.get()))); p->hasFx = true;
-            const double decay = mosaic::MosaicFx::decayFor (p->fx);
-            if (std::abs (decay - lastDecay) > 0.25)
-            {
-                p->impulse = mosaic::MosaicFx::makeImpulse (sr, decay, [this] { return irRandom.nextDouble(); });
-                p->impulseSeconds = decay; p->hasImpulse = true; lastDecay = decay;
-            }
-            juce::DynamicObject::Ptr ts = new juce::DynamicObject(); ts->setProperty ("name", m["name"]); ts->setProperty ("wtLab", m["wtLab"]);
-            p->tableSettings = mosaic::TableEngine::parseSettings (toValue (juce::var (ts.get())), *wtBank);
-            const auto key = waveKeyFor (p->tableSettings);
-            if (key != lastWaveKey || ! lastWaves || wavesRate != sr) { wavesRate = sr; lastWaves = mosaic::buildTableWaves (*wtBank, p->tableSettings, sr); lastWaveKey = key; p->waves = lastWaves; }
-            if (p->tableSettings.motion.on)
-            {
-                const auto mk = mosaic::TableEngine::motionKeyFor (p->tableSettings);
-                if (mk != lastMotionKey)
-                {
-                    lastMotion.clear();
-                    for (int i = 0; i <= 16; ++i) lastMotion[i] = mosaic::TableEngine::buildMotionFrame (*wtBank, p->tableSettings, i, sr);
-                    lastMotionKey = mk; p->motion = lastMotion; p->motionKey = mk;
-                }
-            }
-            p->aOn = (bool) m["aOn"]; p->bOn = (bool) m["bOn"]; p->polyphony = juce::jmax (1, (int) m["polyphony"]); p->glide = (double) m["glide"];
-            if (auto* old = pending.exchange (p))
-            {
-                // not installed yet: keep what it carried that this one does not repeat
-                if (! p->waves && old->waves) p->waves = old->waves;
-                if (! p->hasImpulse && old->hasImpulse) { p->impulse = std::move (old->impulse); p->impulseSeconds = old->impulseSeconds; p->hasImpulse = true; }
-                if (p->motionKey.empty() && ! old->motionKey.empty()) { p->motion = old->motion; p->motionKey = old->motionKey; }
-                delete old;
-            }
-            delete retired.exchange (nullptr);
-            continue;
-        }
+        if (type == "state") { installState (m); continue; }
         Msg x;
         if (type == "on" || type == "off")
         {
@@ -274,7 +289,8 @@ void MosaicProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
         }
 
     // offline renders: wait (briefly) for the page to schedule what this block plays
-    if (isNonRealtime() && host)
+    const juce::SpinLock::ScopedTryLockType hl (hostLock);
+    if (isNonRealtime() && hl.isLocked() && host)
     {
         const double until = (H + N) / sr + 0.12;
         if (pumped.load() < (H + N) / sr)
@@ -365,9 +381,11 @@ void MosaicProcessor::setStateInformation (const void* data, int size)
 {
     juce::MemoryInputStream s (data, (size_t) size, false);
     if (s.readString() != "MOSAIC1") return;
-    setUiState (s.readString());
+    const auto json = s.readString();
+    setUiState (json);
     ++stateVersion;
-    if (host) host->restoreFromProcessor();
+    // the engines take the project's sound now, whether or not the window is open; an open window reloads its page with it
+    juce::MessageManager::callAsync ([this, json] { applyFullState (json); const juce::SpinLock::ScopedLockType l (hostLock); if (host) host->restoreFromProcessor(); });
 }
 
 juce::AudioProcessorEditor* MosaicProcessor::createEditor() { return new MosaicEditor (*this); }

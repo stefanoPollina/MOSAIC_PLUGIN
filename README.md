@@ -9,7 +9,8 @@ Continuum Mosaic (https://stefanopollina.github.io/mosaic_subtractive_fm/) as a 
 
 - **The interface is Mosaic's own page**, unchanged except for a small bridge (`ui/bridge.js`, injected by `tools/build_ui.py`).
   Presets, the factory and user banks, the sequencer, BANK, automation lanes, MOTION and every editor work as in the browser.
-  The page stays running (in a hidden window) when the plugin window is closed.
+  With the window closed the sound, host MIDI, LFO sequencers and MOTION keep working (they are in C++); Mosaic's note
+  sequencer, BANK and automation run in the page, so they pause until the window is open.
 - **The sound is made in C++**, ported from the page and checked against it in Chrome:
   - `Source/dsp/MosaicVoice` — the voice engine (both layers, LFOs, sequencers): sample-identical (`tests/compare_voice.py`, 70/70).
   - `Source/dsp/MosaicFx` + `WebAudioParts` — the whole effects chain, rebuilt with Chrome's own Web Audio behaviour

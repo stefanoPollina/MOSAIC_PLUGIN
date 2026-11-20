@@ -14,9 +14,10 @@
 
   /* ---------- the project's saved sound: Mosaic starts from it (it reads its last state at start-up) ---------- */
   try {
-    const x = new XMLHttpRequest(); x.open('GET', '/__mosaic_state', false); x.send();
-    if (x.status === 200 && x.responseText && x.responseText.length > 2) localStorage.setItem('continuum-mosaic-last-state-v2', x.responseText);
+    const init = window.__JUCE__.initialisationData || {}, saved = init.mosaicState && init.mosaicState[0];
+    if (saved && saved.length > 2) localStorage.setItem('continuum-mosaic-last-state-v2', saved);
   } catch (e) { /* no saved state: Mosaic starts as it would in a browser */ }
+  J.addEventListener('restore', (r) => { try { if (r.state && r.state.length > 2) localStorage.setItem('continuum-mosaic-last-state-v2', r.state); } catch (e) {} location.reload(); });
   // MIDI comes from the host (sample-accurate), not from the page's own Web MIDI
   try { Object.defineProperty(navigator, 'requestMIDIAccess', { value: undefined, configurable: true }); } catch (e) { /* read-only: harmless */ }
   // downloads (WAV, MIDI, presets, banks) become save dialogs
