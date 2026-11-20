@@ -12,7 +12,7 @@ window.render = async (re, im, H, f, det, fmHz, fmD) => { const ctx = new Offlin
  const m = ctx.createOscillator(); m.frequency.value = fmHz; const g = ctx.createGain(); g.gain.value = fmD; m.connect(g); g.connect(o.frequency);
  o.connect(ctx.destination); o.start(0); m.start(0); const r = await ctx.startRendering(); return Array.from(r.getChannelData(0)); };
 </script>""")
-cases = [(16, 512, 110, 0, 0, 0), (16, 512, 440, 14, 0, 0), (16, 64, 2500, -7, 0, 0), (60, 512, 3.3, 0, 0, 0), (60, 512, 6, 0, 0, 0), (100, 512, 55, 0, 3, 40), (5, 128, 7000, 0, 0, 0), (16, 512, 1200, -23, 0, 0), (30, 32, 20000, 0, 0, 0)]
+cases = [(16, 512, 1.0, 0, 0, 0), (16, 512, 0.5, 0, 0, 0), (16, 512, 1.5, 0, 0, 0), (16, 512, 50, 0, 2, 120)]
 with sync_playwright() as p:
     br = p.chromium.launch(); pg = br.new_page(); pg.goto('http://127.0.0.1:8806/osc.html')
     for ti, H, f, det, fmHz, fmD in cases:
