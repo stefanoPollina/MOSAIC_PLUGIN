@@ -12,6 +12,21 @@
 
 class BrowserHost;
 
+/* One of the 48 automatable slots. Slot i drives whatever the SEQ bounce's CC map puts in place i (CC 20, 21, ...);
+   its name follows that setting ("M01 A CUTOFF"), so the DAW's automation lanes say what they move. */
+class SlotParam : public juce::AudioParameterFloat
+{
+public:
+    explicit SlotParam (int i)
+        : juce::AudioParameterFloat (juce::ParameterID { "slot" + juce::String (i + 1).paddedLeft ('0', 2), 1 },
+                                     "M" + juce::String (i + 1).paddedLeft ('0', 2), juce::NormalisableRange<float> (0.0f, 1.0f), 0.0f),
+          label ("M" + juce::String (i + 1).paddedLeft ('0', 2) + " -") {}
+    juce::String getName (int maximumStringLength) const override { const juce::SpinLock::ScopedLockType l (nameLock); return label.substring (0, maximumStringLength); }
+    bool setLabel (const juce::String& s) { const juce::SpinLock::ScopedLockType l (nameLock); if (s == label) return false; label = s; return true; }
+private:
+    mutable juce::SpinLock nameLock; juce::String label;
+};
+
 /* Continuum Mosaic as a plugin. The C++ engines make every sound (Mosaic's voices, TABLE, the effects);
    Mosaic's own page (kept running even while the window is closed) is the brain: presets, banks, sequencer, BANK,
    automation and the editors. The page sends the same audio messages it sends its Web Audio engine in a browser. */
@@ -43,6 +58,10 @@ public:
 
     // ---- from the page (message thread) ----
     void fromPage (const juce::var& list);              // a batch of Mosaic audio messages
+    static constexpr int numSlots = 48;
+    juce::Array<juce::var> slotValues() const;         // the host's values for the 48 slots (any thread)
+    void setSlotNames (const juce::var& names);         // message thread: what each slot drives
+    void slotFromPage (int i, float v);                 // message thread: a hand edit in Mosaic, written to the host
     void setUiState (const juce::String& json);          // the full Mosaic state, saved with the project
     juce::String getUiState() const { const std::lock_guard<std::mutex> l (uiLock); return uiState; }
     std::atomic<int> stateVersion { 0 };                 // bumped when the host restores a project
@@ -116,6 +135,7 @@ private:
 
     mutable std::mutex uiLock; juce::String uiState;
     BrowserHost* host = nullptr; juce::SpinLock hostLock;
+    std::array<SlotParam*, numSlots> slots {};
     void installState (const juce::var& m);
     juce::Random irRandom;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MosaicProcessor)

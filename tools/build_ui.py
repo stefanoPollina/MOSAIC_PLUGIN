@@ -14,7 +14,8 @@ PATCHES = [
      '  if (window.MosaicPlugin) { MosaicPlugin.onMidi = onMidi; MosaicPlugin.observeMidi = (d) => { try { recorder.captureMidi(d); } catch (e) { /* recorder not ready */ } '
      'const s = d[0] & 0xf0, d1 = d[1], d2 = d[2] || 0; bank.midi(s, d1, d2); '
      'if (s === 0x90 && d2 > 0) { bank.noteOn(d1, d2); try { xyAttack(d2); } catch (e) { /* no XY */ } paintKey(d1, true); } '
-     'else if (s === 0x80 || (s === 0x90 && d2 === 0)) { bank.noteOff(d1); paintKey(d1, false); } }; }\n  engine.onMeter = (meter) => {'),
+     'else if (s === 0x80 || (s === 0x90 && d2 === 0)) { bank.noteOff(d1); paintKey(d1, false); } '
+     'else if (s === 0xb0 && window.__mosaicCcIn) window.__mosaicCcIn(d1, d2); }; }\n  engine.onMeter = (meter) => {'),
 ]
 for a, b in PATCHES:
     n = src.count(a)

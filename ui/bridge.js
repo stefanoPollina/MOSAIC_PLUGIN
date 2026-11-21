@@ -128,15 +128,17 @@
   master.connect = (x) => { if (x instanceof FakeAnalyser) x.ch = -1; return x; };
 
   /* ---------- the recorder's capture node: the plugin records its own output ---------- */
-  const recNodes = new Set();
+  const recNodes = new Set(); let recOwner = null;
   J.addEventListener('rec', (m) => {
     if (m.type === 'chunk') { const dec = (s) => { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return new Float32Array(u.buffer); }; m = { type: 'chunk', a: dec(m.a), b: dec(m.b) }; }
-    for (const n of recNodes) if (n.port.onmessage) n.port.onmessage({ data: m });
+    const to = m.type === 'meter' || !recOwner ? recNodes : [recOwner];
+    for (const n of to) if (n.port.onmessage) n.port.onmessage({ data: m });
+    if (m.type === 'done') recOwner = null;
   });
   const RealWorkletNode = window.AudioWorkletNode;
   window.AudioWorkletNode = function (ctx, name, opts) {
     if (ctx !== fakeCtx) return new RealWorkletNode(ctx, name, opts);
-    const node = Object.assign(dummy(), { port: { onmessage: null, postMessage: (m) => send({ type: 'rec', msg: m }), start() {}, close() {} } });
+    const node = Object.assign(dummy(), { port: { onmessage: null, postMessage: (m) => { if (m && m.cmd === 'record') recOwner = node; send({ type: 'rec', msg: m }); }, start() {}, close() {} } });
     recNodes.add(node); return node;
   };
 
@@ -176,6 +178,7 @@
         send({ type: 'state', slim: this.slimState(s), fx: s.fx || {}, master: s.master, bpm: (s.seq && s.seq.bpm) || 120, name: s.name || '', wtLab: s.wtLab || null,
           aOn: !(L.A && L.A.enabled === false), bOn: !(L.B && L.B.enabled === false), polyphony: s.polyphony || 8, glide: s.glide || 0 });
         J.emitEvent('ui', { state: JSON.stringify(s) });
+        slotsOut();
       }
       applyFx() { if (this.state) this.setState(this.state); }
       // TABLE voices are played by the plugin from these same messages
@@ -206,6 +209,45 @@
   /* ---------- the DAW's transport: tempo, play and stop, and offline renders ---------- */
   // Mosaic's sequencer is started on the DAW's step grid and then kept locked to it: tempo changes, loop jumps and
   // repositioning are followed, not just the first play.
+  /* ---------- host parameters: 48 slots, slot i = the SEQ bounce's CC map entry i ---------- */
+  const SLOTS = 48, hostLast = new Float64Array(SLOTS).fill(NaN); let names = '', touchUntil = 0;
+  // only edits made by hand go back to the host (so Mosaic's own SEQ automation never fights Ableton's)
+  const touch = (ms) => () => { touchUntil = Math.max(touchUntil, performance.now() + ms); };
+  document.addEventListener('pointerdown', touch(1e9), true); document.addEventListener('pointerup', () => { touchUntil = performance.now() + 400; }, true);
+  document.addEventListener('wheel', touch(400), true); document.addEventListener('keydown', touch(400), true);
+  function slotsIn(vals) {   // the host's parameter values (every timer frame, and with each offline pump)
+    if (!vals || !window.__mosaicSlotIn) return;
+    for (let i = 0; i < SLOTS && i < vals.length; i++) {
+      const v = +vals[i];
+      if (Number.isNaN(hostLast[i])) { hostLast[i] = v; continue; }     // first look: remember, don't apply the host's defaults
+      if (Math.abs(v - hostLast[i]) > 1e-7) { hostLast[i] = v; window.__mosaicSlotIn(i, v); }
+    }
+  }
+  function slotsOut() {
+    if (!window.__mosaicSlots) return;
+    const sl = window.__mosaicSlots(), lab = sl.map((x, i) => 'M' + String(i + 1).padStart(2, '0') + ' ' + (x ? x.label : '-')).join('\n');
+    if (lab !== names) { names = lab; J.emitEvent('paramNames', { names: lab.split('\n') }); }
+    if (performance.now() > touchUntil) return;
+    const out = [];
+    sl.forEach((x, i) => { if (!x) return; const r = window.__mosaicSlotOut(i); if (r != null && !(Math.abs(r - hostLast[i]) < 1e-6)) { hostLast[i] = r; out.push([i, r]); } });
+    if (out.length) J.emitEvent('paramOut', { list: out });
+  }
+  J.addEventListener('params', (p) => { try { slotsIn(p.values); } catch (e) { console.error(e); } });
+
+  /* ---------- SEQ FOLLOWS HOST: off = the DAW's play button leaves Mosaic's SEQ alone (for MIDI clips exported by BOUNCE) ---------- */
+  let follow = true; try { follow = localStorage.getItem('mosaic-seq-follows-host') !== '0'; } catch (e) { /* no storage */ }
+  MP.followHost = () => follow;
+  function addFollowButton() {
+    const bounce = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'BOUNCE');
+    if (!bounce || document.getElementById('mp-follow')) return !!bounce;
+    const b = document.createElement('button'); b.id = 'mp-follow'; b.type = 'button'; b.className = 'texty seq-bounce' + (follow ? ' on' : ''); b.textContent = 'FOLLOW HOST';
+    b.title = 'On: pressing play in the DAW plays Mosaic\'s SEQ in time. Off: the DAW only plays what its MIDI clips send (use with BOUNCE MIDI clips).';
+    b.onclick = () => { follow = !follow; b.classList.toggle('on', follow); try { localStorage.setItem('mosaic-seq-follows-host', follow ? '1' : '0'); } catch (e) { /* no storage */ }
+      const seq = window.__mosaicSequencer; if (!follow && seq && seq.playing && hostPlaying) seq.stop(); };
+    bounce.parentNode.insertBefore(b, bounce.nextSibling); return true;
+  }
+  const followTimer = setInterval(() => { if (addFollowButton()) clearInterval(followTimer); }, 500);
+
   let hostPlaying = false, lastPpq = 0;
   const lockTo = (t, st, seq, e, force) => {
     const div = Number(st.seq.division || 0.25), beat = 60 / (st.seq.bpm || 120), len = st.seq.length || 16;
@@ -236,7 +278,9 @@
     if (!st || !e) return;
     if (t.hasTempo && t.bpm > 0 && Math.abs((st.seq.bpm || 120) - t.bpm) > 1e-6) { st.seq.bpm = t.bpm; e.setState(st); if (MP.onTempo) MP.onTempo(t.bpm); }
     if (!seq || !t.hasTransport) return;
-    if (t.playing && !hostPlaying) {
+    if (!follow) {
+      if (t.playing) setLfoAnchor(t, 60 / (st.seq.bpm || 120), !hostPlaying);
+    } else if (t.playing && !hostPlaying) {
       seq.start();
       setTimeout(() => { if (seq.playing) lockTo(t, st, seq, e, 'start'); }, 0);
     } else if (t.playing && seq.playing) {
@@ -247,6 +291,7 @@
   // offline (faster than real time) render: the plugin waits until the sequencer has scheduled up to `until`
   J.addEventListener('pump', (p) => {
     clk = Object.assign({}, clk, { t: p.now, offline: true, wall: performance.now() });
+    try { slotsIn(p.params); } catch (err) { console.error(err); }
     try { const e = MP.engine; if (e && e.beforeRender) e.beforeRender(p.until); } catch (err) { console.error(err); }
     flush(); J.emitEvent('pumped', { until: p.until });
   });

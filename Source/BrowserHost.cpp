@@ -20,6 +20,8 @@ BrowserHost::BrowserHost (MosaicProcessor& p) : proc (p)
         .withEventListener ("msg", [this] (const juce::var& v) { pageReady = true; proc.fromPage (v["list"]); })
         .withEventListener ("ui", [this] (const juce::var& v) { proc.setUiState (v["state"].toString()); })
         .withEventListener ("pumped", [this] (const juce::var& v) { proc.pumped = (double) v["until"]; proc.pumpedEvent.signal(); })
+        .withEventListener ("paramNames", [this] (const juce::var& v) { proc.setSlotNames (v["names"]); })
+        .withEventListener ("paramOut", [this] (const juce::var& v) { const auto& l = v["list"]; for (int i = 0; i < l.size(); ++i) proc.slotFromPage ((int) l[i][0], (float) (double) l[i][1]); })
         .withEventListener ("save", [this] (const juce::var& v)
         {
             // Mosaic's exports (WAV, MIDI, presets, banks): a save dialog instead of a browser download
@@ -79,7 +81,7 @@ juce::String BrowserHost::b64 (const float* data, size_t count) { return juce::B
 
 void BrowserHost::handleAsyncUpdate()
 {
-    auto* o = new juce::DynamicObject(); o->setProperty ("now", proc.clockSeconds()); o->setProperty ("until", proc.wantPump.load());
+    auto* o = new juce::DynamicObject(); o->setProperty ("now", proc.clockSeconds()); o->setProperty ("until", proc.wantPump.load()); o->setProperty ("params", proc.slotValues());
     if (pageReady) emit ("pump", juce::var (o)); else proc.pumpedEvent.signal();
 }
 
@@ -95,6 +97,8 @@ void BrowserHost::timerCallback()
         o->setProperty ("hasTempo", t.hasTempo); o->setProperty ("hasTransport", t.hasTransport); o->setProperty ("playing", t.playing);
         o->setProperty ("bpm", t.bpm); o->setProperty ("ppq", t.ppq); o->setProperty ("time", t.time); emit ("transport", juce::var (o));
     }
+    // the host's automation of the 48 slots
+    { auto* o = new juce::DynamicObject(); o->setProperty ("values", proc.slotValues()); emit ("params", juce::var (o)); }
     // meter (voices, cpu, waveform) every other frame, the output for scopes and spectra every frame
     static int n = 0;
     if (++n % 2 == 0)

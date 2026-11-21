@@ -28,6 +28,25 @@ MosaicProcessor::MosaicProcessor()
     table.setBank (wtBank);
     outBuf.assign ((size_t) outFifo.getTotalSize() * 2, 0.f);
     recBuf.assign ((size_t) recFifo.getTotalSize() * 2, 0.f);
+    for (int i = 0; i < numSlots; ++i) { auto* p = new SlotParam (i); addParameter (p); slots[(size_t) i] = p; }
+}
+
+juce::Array<juce::var> MosaicProcessor::slotValues() const
+{
+    juce::Array<juce::var> a; for (auto* p : slots) a.add ((double) p->get()); return a;
+}
+
+void MosaicProcessor::setSlotNames (const juce::var& names)
+{
+    bool changed = false;
+    for (int i = 0; i < numSlots && i < names.size(); ++i) changed |= slots[(size_t) i]->setLabel (names[i].toString());
+    if (changed) updateHostDisplay (juce::AudioProcessorListener::ChangeDetails{}.withParameterInfoChanged (true));
+}
+
+void MosaicProcessor::slotFromPage (int i, float v)
+{
+    if (i < 0 || i >= numSlots) return;
+    auto* p = slots[(size_t) i]; p->beginChangeGesture(); p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, v)); p->endChangeGesture();
 }
 
 MosaicProcessor::~MosaicProcessor()

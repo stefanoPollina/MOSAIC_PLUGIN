@@ -5,6 +5,13 @@ Continuum Mosaic (https://stefanopollina.github.io/mosaic_subtractive_fm/) as a 
 **Download:** https://github.com/stefanoPollina/MOSAIC_PLUGIN/releases/latest
 (`Mosaic-Windows-Setup.exe`, or `Mosaic-Windows-Plugins.zip` to copy by hand into `C:\Program Files\Common Files\VST3`).
 
+## SEQ patterns in your DAW
+
+- **BOUNCE** (SEQ panel, next to CLEAR LANE) plays the pattern from step 1 and saves a 24-bit WAV of 1, 2, 4 or 8 whole cycles: the exact sound, with SEQ automation, LFOs, macros and FX. **LOOP-READY** plays one cycle first so reverb and delay tails wrap round and the clip loops seamlessly.
+- **+MIDI** also saves a MIDI clip: the notes Mosaic played, and every setting that moved as a CC lane (CC 20-31, 52-63, 85-90, 102-119). The CC map is written into the file and saved in the preset, so playing the clip into Mosaic moves the same settings (CCs have 128 steps, so this is very close rather than bit-exact; the WAV is exact).
+- **FOLLOW HOST** (plugin only): on, the DAW's play button runs Mosaic's own SEQ in time; off, only the DAW's MIDI clips play, which is what you want with a bounced MIDI clip.
+- **Automation parameters M01-M48**: slot *n* drives the setting in place *n* of the CC map, and takes its name ("M01 A CUTOFF"). DAW automation moves Mosaic at full resolution; moving that control in Mosaic by hand writes to the host, so the DAW can record it. Mosaic's page has to be open (the plugin window) for automation and its SEQ to act.
+
 ## How it is built
 
 - **The interface is Mosaic's own page**, unchanged except for a small bridge (`ui/bridge.js`, injected by `tools/build_ui.py`).
