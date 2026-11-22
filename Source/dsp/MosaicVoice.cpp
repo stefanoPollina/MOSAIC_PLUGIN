@@ -384,6 +384,11 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
     const double beatDur = 60.0 / ((S && S->bpm == S->bpm && S->bpm > 0) ? S->bpm : 120.0);
     const double duckRel = (S && S->duckRel == S->duckRel && S->duckRel > 0) ? std::min (0.96, std::max (0.12, S->duckRel)) : 0.55;
     const double duckExp = 0.25 + std::min (1.0, std::max (0.0, (S && S->duckShape == S->duckShape) ? S->duckShape : 0.35)) * 1.75;
+    const bool cbOn = S && S->combOn;
+    if (cbOn && cbBuf[0].empty()) { for (auto& b : cbBuf) b.assign (4096, 0.f); cbW = 0; cbLp[0] = cbLp[1] = 0; }
+    double cbDL = 0, cbDR = 0, cbFb = 0, cbMix = 0, cbA = 0;
+    if (cbOn) { const double hz = 55 + std::pow (std::min (1.0, std::max (0.0, S->combTune)), 1.8) * 650; cbDL = sr / hz; cbDR = sr / (hz * 1.015);
+                cbFb = std::min (1.0, std::max (0.0, S->combFb)) * 0.88; cbMix = std::min (1.0, std::max (0.0, S->combMix)); cbA = 1 - std::exp (-2 * 3.141592653589793 * 2400 / sr); }
     const bool fgOn = S && S->fgOn;
     if (fgOn && ! fgInit) { fgInit = true; fgF = 1000; fgG = 1; fgN = 0; for (auto& z : fgZ) z = 0; }
     const double fgKf = 1 - std::exp (-1 / (0.008 * sr)), fgKg = 1 - std::exp (-1 / (0.006 * sr));
@@ -1040,6 +1045,14 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
             const double bp = std::fmod (std::fmod (t - l8anchor, beatDur) + beatDur, beatDur) / beatDur;
             const double g = 1 - duck * (1 - (bp < 0.03 ? 1 - bp / 0.03 : std::pow (std::min (1.0, (bp - 0.03) / duckRel), duckExp)));
             busL *= g; busR *= g;
+        }
+        if (cbOn)
+        {
+            auto rd = [this] (int c, double d) { double r = cbW - d; if (r < 0) r += 4096; const int i0 = (int) r; const double f = r - i0; const float a = cbBuf[c][(size_t) i0], b = cbBuf[c][(size_t) ((i0 + 1) & 4095)]; return a + (b - a) * f; };
+            const double yl = rd (0, cbDL), yr = rd (1, cbDR);
+            cbLp[0] += (yl - cbLp[0]) * cbA; cbLp[1] += (yr - cbLp[1]) * cbA;
+            cbBuf[0][(size_t) cbW] = (float) (busL + cbLp[0] * cbFb); cbBuf[1][(size_t) cbW] = (float) (busR + cbLp[1] * cbFb); cbW = (cbW + 1) & 4095;
+            busL = (float) (busL * (1 - cbMix * 0.4) + cbLp[0] * cbMix); busR = (float) (busR * (1 - cbMix * 0.4) + cbLp[1] * cbMix);
         }
         if (fgOn)
         {

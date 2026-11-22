@@ -91,6 +91,8 @@ private:
     double oscRatios[2][3] {}; double unisonRatios[5][4] {};
     double l8anchor = 0;
     // PSY FILTER GATE: smoothed cutoff / level, two low-pass sections per channel (transposed direct form II), as the page's worklet
+    // RESO COMB: two 4096-sample lines read at a fractional delay, one-pole 2.4 kHz low-pass in the feedback
+    std::vector<float> cbBuf[2]; int cbW = 0; double cbLp[2] {};
     double fgF = 1000, fgG = 1, fgZ[8] {}, fgC[10] {}; unsigned fgN = 0; bool fgInit = false;
     double ug[16] {}; double uAbs = -1e12; int uMask = 0, uRise = 0; double uK = 1;
     double xd[40] {};

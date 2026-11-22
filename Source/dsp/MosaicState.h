@@ -59,6 +59,7 @@ struct State
 {
     bool present = false;
     double bendRange = NaN, detune = NaN, unison = NaN, bpm = NaN, duck = NaN, duckRel = NaN, duckShape = NaN;
+    bool combOn = false; double combTune = 0.35, combFb = 0.55, combMix = 0.35;   // RESO COMB (state.comb)
     bool fgOn = false; int fgSteps[16] {}; double fgCut = 0.42, fgRes = 0.35, fgDepth = 0.85;   // PSY FILTER GATE (state.fg)   // duck: the 1/4-note sidechain pump (fx.duckDepth)
     std::array<Lfo, 8> lfo {}; bool hasLfo = false;
     std::array<Lfo, 8> lfoB {}; bool hasLfoB = false;

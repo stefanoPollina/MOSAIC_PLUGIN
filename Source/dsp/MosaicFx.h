@@ -28,6 +28,8 @@ struct FxState
     bool mstOn = false; double mstMono = 140, mstLowCut = 30, mstAir = 2.8, mstWarm = 0, mstWidth = 1, mstTame = 0;
     bool fsOn = false; double fsShift = 4, fsFb = 0.25, fsMix = 0.35;          // PSY FREQ SHIFT (single-sideband, Hz)
     bool tapeOn = false; double tapeSat = 0.3, tapeHead = 0.45, tapeWow = 0.15; // ANALOG TAPE
+    bool lofiOn = false; double lofiGrit = 0.35, lofiBits = 0.4, lofiLp = 0.45;              // VINYL & LO-FI
+    bool springOn = false; double springBoing = 0.55, springDecay = 0.5, springMix = 0.32;  // SPRING TANK
     bool dubOn = false, dubThrow = false; double dubDiv = 1, dubFb = 0.58, dubMix = 0.38;   // DUB SPACE ECHO   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
     double master = 0.8, bpm = 120;
     static FxState fromJson (const json::Value& fullState);   // reads state.fx, state.master, state.seq.bpm as applyFx does
@@ -90,6 +92,8 @@ private:
     // ANALOG TAPE: tanh/k curve through Chrome's 2x oversampled shaper -> head low-pass -> 8 ms delay with slow wow
     // DUB SPACE ECHO: one stereo delay (channel 0 = left line, 1 = right line, read at 4:3), each repeat high-passed at 210 Hz, low-passed at 1.85 kHz,
     // tape-saturated at unity gain, then fed to the other line (the cross hop runs a quantum late, as Chrome runs a cycle)
+    std::vector<float> lfCurve; double lfLv = -1, lfDr = -1; wa::Biquad lfLp; wa::Param lfLpF, lfDryG, lfWetG;
+    wa::Biquad spHp, spAp[3], spLp, spDamp; wa::Delay spD; wa::Lag128 spLoop; wa::Param spSendG, spWetG, spFbG, spQ;
     wa::Delay dubD; wa::Biquad dubHp, dubLp; std::vector<float> dubCurve; wa::Lag128 dubLoop; wa::Param dubSendG, dubWetG, dubFbG, dubTL, dubTR;
     wa::Shaper2x tpShaper; std::vector<float> tpCurve; double tpCurveK = -1, tpPh = 0; wa::Biquad tpHead; wa::Param tpHeadF, tpWowG, tpDryG, tpWetG; wa::Delay tpWowD;
     long long frame = 0;

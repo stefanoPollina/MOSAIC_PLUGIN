@@ -35,6 +35,8 @@ FxState FxState::fromJson (const json::Value& s)
     f.compOn = x["compOn"].truthy(); f.compThreshold = x["compThreshold"].numOr (0); f.compRatio = x["compRatio"].numOr (1); f.compAttack = x["compAttack"].numOr (0.001); f.compRelease = x["compRelease"].numOr (0.02);
     f.mstOn = x["mstOn"].truthy(); f.mstMono = numD (x["mstMono"], 140); f.mstLowCut = numD (x["mstLowCut"], 30); f.mstAir = numD (x["mstAir"], 2.8); f.mstWarm = numD (x["mstWarm"], 0); f.mstWidth = numD (x["mstWidth"], 1); f.mstTame = numD (x["mstTame"], 0);
     f.fsOn = x["fsOn"].truthy(); f.fsShift = numD (x["fsShift"], 4); f.fsFb = numD (x["fsFb"], 0.25); f.fsMix = numD (x["fsMix"], 0.35);
+    f.lofiOn = x["lofiOn"].truthy(); f.lofiGrit = numD (x["lofiGrit"], 0.35); f.lofiBits = numD (x["lofiBits"], 0.4); f.lofiLp = numD (x["lofiLp"], 0.45);
+    f.springOn = x["springOn"].truthy(); f.springBoing = numD (x["springBoing"], 0.55); f.springDecay = numD (x["springDecay"], 0.5); f.springMix = numD (x["springMix"], 0.32);
     f.dubOn = x["dubOn"].truthy(); f.dubThrow = x["dubThrow"].truthy(); f.dubDiv = numD (x["dubDiv"], 1); f.dubFb = numD (x["dubFb"], 0.58); f.dubMix = numD (x["dubMix"], 0.38);
     f.tapeOn = x["tapeOn"].truthy(); f.tapeSat = numD (x["tapeSat"], 0.3); f.tapeHead = numD (x["tapeHead"], 0.45); f.tapeWow = numD (x["tapeWow"], 0.15);
     f.master = s["master"].numOr (0); f.bpm = s["seq"].isObject() && s["seq"]["bpm"].truthy() ? s["seq"]["bpm"].numOr (120) : 120;
@@ -83,6 +85,9 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     { const double A[4] = { 0.6923878, 0.9360654322959, 0.9882295226860, 0.9987488452737 }, B[4] = { 0.4021921162426, 0.8561710882420, 0.9722909545651, 0.9952884791278 };
       for (int k = 0; k < 4; ++k) { hilI[k] = HilSec(); hilI[k].a2 = A[k] * A[k]; hilQ[k] = HilSec(); hilQ[k].a2 = B[k] * B[k]; } }
     hilDelay[0] = hilDelay[1] = 0; fsPh = 0; fsHz.init (0); fsDryG.init (1); fsWetG.init (0); fsFbG.init (0); fsFbDelay.prepare (sr, 0.2, true); bq (fsFbLp, wa::BiquadType::lowpass); fsLoop.reset();
+    lfLv = lfDr = -1; bq (lfLp, wa::BiquadType::lowpass); lfLpF.init (5500); lfDryG.init (1); lfWetG.init (0);
+    bq (spHp, wa::BiquadType::highpass); for (auto& a : spAp) bq (a, wa::BiquadType::allpass); bq (spLp, wa::BiquadType::lowpass); bq (spDamp, wa::BiquadType::lowpass);
+    spD.prepare (sr, 0.5, true); spLoop.reset(); spSendG.init (0); spWetG.init (0); spFbG.init (0); spQ.init (4.25);
     dubD.prepare (sr, 2, true); bq (dubHp, wa::BiquadType::highpass); bq (dubLp, wa::BiquadType::lowpass); dubLoop.reset();
     dubSendG.init (0); dubWetG.init (0); dubFbG.init (0); dubTL.init (0.32); dubTR.init (0.42);
     { const double k = 1 + 0.45 * 5.5; dubCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) dubCurve[(size_t) i] = (float) (std::tanh (((double) i * 2 / 2047 - 1) * k) / k); }
@@ -207,6 +212,11 @@ void MosaicFx::applyBus (double beat)
       if (std::abs (k - tpCurveK) > 1e-6) { tpCurveK = k; const int n = 2048; tpCurve.assign ((size_t) n, 0.f); for (int i = 0; i < n; ++i) tpCurve[(size_t) i] = (float) (std::tanh (((double) i * 2 / (n - 1) - 1) * k) / k); }
       setTarget (tpHeadF, 4500 + (1 - clampd (fx.tapeHead, 0, 1)) * 11500); setTarget (tpWowG, fx.tapeOn ? clampd (fx.tapeWow, 0, 1) * 0.0012 : 0);
       setTarget (tpDryG, fx.tapeOn ? 0 : 1); setTarget (tpWetG, fx.tapeOn ? 1 : 0); }
+    { const double lv = std::max (4.0, std::round (64 - clampd (fx.lofiBits, 0, 1) * 56)), ld = 1 + clampd (fx.lofiGrit, 0, 1) * 3.5;
+      if (lv != lfLv || std::abs (ld - lfDr) > 1e-9) { lfLv = lv; lfDr = ld; lfCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) lfCurve[(size_t) i] = (float) (std::round (std::tanh (((double) i * 2 / 2047 - 1) * ld) / ld * lv) / lv); }
+      setTarget (lfLpF, 1400 + (1 - clampd (fx.lofiLp, 0, 1)) * 8600); setTarget (lfDryG, fx.lofiOn ? 0 : 1); setTarget (lfWetG, fx.lofiOn ? 1 : 0);
+      setTarget (spQ, 1.5 + clampd (fx.springBoing, 0, 1) * 5); setTarget (spFbG, fx.springOn ? 0.35 + clampd (fx.springDecay, 0, 1) * 0.52 : 0);
+      setTarget (spSendG, fx.springOn ? 1 : 0); setTarget (spWetG, fx.springOn ? clampd (fx.springMix, 0, 1) * 1.2 : 0); }
     { static const double M[5] = { 0.5, 0.75, 1.0, 1.5, 2.0 };
       const double b = 60.0 / std::max (60.0, std::min (220.0, fx.bpm)), tl = std::min (1.9, b * M[(int) std::lround (clampd (fx.dubDiv, 0, 4))]);
       setTarget (dubTL, tl); setTarget (dubTR, std::min (1.9, tl * 1.333));
@@ -433,6 +443,10 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             for (int c = 0; c < 2; ++c) { fsLoop.write (c, fsFbLp.tick (c, fsFbDelay.read (c, 0.018))); o[c] = o[c] * fd + sh[c] * fw; }
             fsFbDelay.advance(); fsLoop.advance();
         }
+        {   // VINYL & LO-FI
+            const float ld = (float) lfDryG.next(), lw = (float) lfWetG.next(); lfLp.coeffs (lfLpF.next(), 0.85);
+            for (int c = 0; c < 2; ++c) { const float wv = lfLp.tick (c, wa::shapeCurve (lfCurve, o[c])); o[c] = o[c] * ld + wv * lw; }
+        }
         {   // DUB SPACE ECHO
             const float ds = (float) dubSendG.next(), dw = (float) dubWetG.next(), dg = (float) dubFbG.next(); const double tl = dubTL.next(), tr = dubTR.next();
             dubHp.coeffs (210, 1); dubLp.coeffs (1850, 1);
@@ -441,6 +455,17 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             dubD.write (0, o[0] * ds + dubLoop.read (1)); dubD.write (1, o[1] * ds + sat[0]); dubLoop.write (1, sat[1]);
             dubD.advance(); dubLoop.advance();
             for (int c = 0; c < 2; ++c) o[c] += y[c] * dw;
+        }
+        {   // SPRING TANK
+            const float ss = (float) spSendG.next(), sw = (float) spWetG.next(), sg = (float) spFbG.next(); const double q = spQ.next();
+            spHp.coeffs (240, 1); spAp[0].coeffs (620, q); spAp[1].coeffs (1180, q * 1.1); spAp[2].coeffs (1950, q * 1.2); spLp.coeffs (2300, 1); spDamp.coeffs (3000, 1);
+            float y[2], x[2];
+            for (int c = 0; c < 2; ++c) { float v = spHp.tick (c, o[c] * ss); for (auto& a : spAp) v = a.tick (c, v); x[c] = spLp.tick (c, v); }
+            y[0] = spD.read (0, 0.041); y[1] = spD.read (1, 0.053);
+            const float toR = spDamp.tick (0, y[0]) * sg, toL = spDamp.tick (1, y[1]) * sg;
+            spD.write (0, x[0] + spLoop.read (0)); spD.write (1, x[1] + toR); spLoop.write (0, toL);
+            spD.advance(); spLoop.advance();
+            for (int c = 0; c < 2; ++c) o[c] += y[c] * sw;
         }
         {   // ANALOG TAPE
             const float td = (float) tpDryG.next(), tw = (float) tpWetG.next(); const double wow = tpWowG.next();
