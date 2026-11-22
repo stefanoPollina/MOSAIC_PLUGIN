@@ -90,6 +90,8 @@ private:
     Stage envStage = Stage::idle; double envValue = 0, envWait = 0;
     double oscRatios[2][3] {}; double unisonRatios[5][4] {};
     double l8anchor = 0;
+    // PSY FILTER GATE: smoothed cutoff / level, two low-pass sections per channel (transposed direct form II), as the page's worklet
+    double fgF = 1000, fgG = 1, fgZ[8] {}, fgC[10] {}; unsigned fgN = 0; bool fgInit = false;
     double ug[16] {}; double uAbs = -1e12; int uMask = 0, uRise = 0; double uK = 1;
     double xd[40] {};
     uint8_t cf[16] {};

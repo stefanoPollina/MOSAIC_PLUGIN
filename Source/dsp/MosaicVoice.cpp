@@ -384,6 +384,16 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
     const double beatDur = 60.0 / ((S && S->bpm == S->bpm && S->bpm > 0) ? S->bpm : 120.0);
     const double duckRel = (S && S->duckRel == S->duckRel && S->duckRel > 0) ? std::min (0.96, std::max (0.12, S->duckRel)) : 0.55;
     const double duckExp = 0.25 + std::min (1.0, std::max (0.0, (S && S->duckShape == S->duckShape) ? S->duckShape : 0.35)) * 1.75;
+    const bool fgOn = S && S->fgOn;
+    if (fgOn && ! fgInit) { fgInit = true; fgF = 1000; fgG = 1; fgN = 0; for (auto& z : fgZ) z = 0; }
+    const double fgKf = 1 - std::exp (-1 / (0.008 * sr)), fgKg = 1 - std::exp (-1 / (0.006 * sr));
+    double fgOpen = 0, fgClosed = 0, fgLow = 1, fgQ = 0.70710678;
+    if (fgOn) { const double cut = std::min (1.0, std::max (0.0, S->fgCut)), dep = std::min (1.0, std::max (0.0, S->fgDepth)), base = 180 + std::pow (cut, 1.8) * 3800;
+                fgOpen = std::min (4800.0, base * (1.2 + dep * 2.4)); fgClosed = std::max (110.0, base * (1 - dep * 0.72)); fgLow = std::max (0.05, 1 - dep * 0.92);
+                fgQ = 0.70710678 + std::min (1.0, std::max (0.0, S->fgRes)) * 2.5; }
+    auto fgCoef = [this, sr] (int o, double f, double q) { const double w0 = 2 * 3.141592653589793 * std::min (f, sr * 0.45) / sr, cs = std::cos (w0), al = std::sin (w0) / (2 * q), a0 = 1 + al;
+                                                       fgC[o] = (1 - cs) / 2 / a0; fgC[o + 1] = (1 - cs) / a0; fgC[o + 2] = (1 - cs) / 2 / a0; fgC[o + 3] = -2 * cs / a0; fgC[o + 4] = (1 - al) / a0; };
+    auto fgTick = [this] (int o, int zo, double x) { const double y = fgC[o] * x + fgZ[zo]; fgZ[zo] = fgC[o + 1] * x - fgC[o + 3] * y + fgZ[zo + 1]; fgZ[zo + 1] = fgC[o + 2] * x - fgC[o + 4] * y; return y; };
     for (int i = 0; i < frames; ++i)
     {
         const double t = now + i / sr;
@@ -1031,6 +1041,14 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
             const double g = 1 - duck * (1 - (bp < 0.03 ? 1 - bp / 0.03 : std::pow (std::min (1.0, (bp - 0.03) / duckRel), duckExp)));
             busL *= g; busR *= g;
         }
+        if (fgOn)
+        {
+            const double k16 = std::floor (((t - l8anchor) / beatDur) * 4); const int idx = (((long long) k16 % 16) + 16) % 16; const bool act = S->fgSteps[idx] != 0;
+            fgF += ((act ? fgOpen : fgClosed) - fgF) * fgKf; fgG += ((act ? 1.0 : fgLow) - fgG) * fgKg;
+            if ((fgN++ & 15u) == 0) { fgCoef (0, fgF, fgQ); fgCoef (5, fgF, 0.70710678); }
+            busL = (float) (fgTick (5, 4, fgTick (0, 0, busL)) * fgG); busR = (float) (fgTick (5, 6, fgTick (0, 2, busR)) * fgG);
+        }
+        else fgInit = false;
         busL *= 0.72; busR *= 0.72;
         const double dcL = busL - dcInL + 0.995 * dcOutL; dcInL = busL; dcOutL = dcL;
         const double dcR = busR - dcInR + 0.995 * dcOutR; dcInR = busR; dcOutR = dcR;

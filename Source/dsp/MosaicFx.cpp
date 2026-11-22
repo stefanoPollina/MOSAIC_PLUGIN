@@ -35,6 +35,7 @@ FxState FxState::fromJson (const json::Value& s)
     f.compOn = x["compOn"].truthy(); f.compThreshold = x["compThreshold"].numOr (0); f.compRatio = x["compRatio"].numOr (1); f.compAttack = x["compAttack"].numOr (0.001); f.compRelease = x["compRelease"].numOr (0.02);
     f.mstOn = x["mstOn"].truthy(); f.mstMono = numD (x["mstMono"], 140); f.mstLowCut = numD (x["mstLowCut"], 30); f.mstAir = numD (x["mstAir"], 2.8); f.mstWarm = numD (x["mstWarm"], 0); f.mstWidth = numD (x["mstWidth"], 1); f.mstTame = numD (x["mstTame"], 0);
     f.fsOn = x["fsOn"].truthy(); f.fsShift = numD (x["fsShift"], 4); f.fsFb = numD (x["fsFb"], 0.25); f.fsMix = numD (x["fsMix"], 0.35);
+    f.dubOn = x["dubOn"].truthy(); f.dubThrow = x["dubThrow"].truthy(); f.dubDiv = numD (x["dubDiv"], 1); f.dubFb = numD (x["dubFb"], 0.58); f.dubMix = numD (x["dubMix"], 0.38);
     f.tapeOn = x["tapeOn"].truthy(); f.tapeSat = numD (x["tapeSat"], 0.3); f.tapeHead = numD (x["tapeHead"], 0.45); f.tapeWow = numD (x["tapeWow"], 0.15);
     f.master = s["master"].numOr (0); f.bpm = s["seq"].isObject() && s["seq"]["bpm"].truthy() ? s["seq"]["bpm"].numOr (120) : 120;
     return f;
@@ -82,6 +83,9 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     { const double A[4] = { 0.6923878, 0.9360654322959, 0.9882295226860, 0.9987488452737 }, B[4] = { 0.4021921162426, 0.8561710882420, 0.9722909545651, 0.9952884791278 };
       for (int k = 0; k < 4; ++k) { hilI[k] = HilSec(); hilI[k].a2 = A[k] * A[k]; hilQ[k] = HilSec(); hilQ[k].a2 = B[k] * B[k]; } }
     hilDelay[0] = hilDelay[1] = 0; fsPh = 0; fsHz.init (0); fsDryG.init (1); fsWetG.init (0); fsFbG.init (0); fsFbDelay.prepare (sr, 0.2, true); bq (fsFbLp, wa::BiquadType::lowpass); fsLoop.reset();
+    dubD.prepare (sr, 2, true); bq (dubHp, wa::BiquadType::highpass); bq (dubLp, wa::BiquadType::lowpass); dubLoop.reset();
+    dubSendG.init (0); dubWetG.init (0); dubFbG.init (0); dubTL.init (0.32); dubTR.init (0.42);
+    { const double k = 1 + 0.45 * 5.5; dubCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) dubCurve[(size_t) i] = (float) (std::tanh (((double) i * 2 / 2047 - 1) * k) / k); }
     tpShaper.reset(); tpCurveK = -1; tpPh = 0; bq (tpHead, wa::BiquadType::lowpass); tpHeadF.init (10000); tpWowG.init (0); tpDryG.init (1); tpWetG.init (0); tpWowD.prepare (sr, 0.05, false);
     bq (mstSide1, wa::BiquadType::highpass); bq (mstSide2, wa::BiquadType::highpass); mstMonoF.init (140);
     ppIn.init (0); bq (ppHp, wa::BiquadType::highpass); ppHpF.init (300); bq (ppLp, wa::BiquadType::lowpass); ppLpF.init (3500);
@@ -203,6 +207,11 @@ void MosaicFx::applyBus (double beat)
       if (std::abs (k - tpCurveK) > 1e-6) { tpCurveK = k; const int n = 2048; tpCurve.assign ((size_t) n, 0.f); for (int i = 0; i < n; ++i) tpCurve[(size_t) i] = (float) (std::tanh (((double) i * 2 / (n - 1) - 1) * k) / k); }
       setTarget (tpHeadF, 4500 + (1 - clampd (fx.tapeHead, 0, 1)) * 11500); setTarget (tpWowG, fx.tapeOn ? clampd (fx.tapeWow, 0, 1) * 0.0012 : 0);
       setTarget (tpDryG, fx.tapeOn ? 0 : 1); setTarget (tpWetG, fx.tapeOn ? 1 : 0); }
+    { static const double M[5] = { 0.5, 0.75, 1.0, 1.5, 2.0 };
+      const double b = 60.0 / std::max (60.0, std::min (220.0, fx.bpm)), tl = std::min (1.9, b * M[(int) std::lround (clampd (fx.dubDiv, 0, 4))]);
+      setTarget (dubTL, tl); setTarget (dubTR, std::min (1.9, tl * 1.333));
+      const bool live = fx.dubOn || fx.dubThrow; setTarget (dubFbG, fx.dubThrow ? 0.94 : fx.dubOn ? clampd (fx.dubFb, 0, 1) * 0.86 : 0);
+      setTarget (dubSendG, live ? 1 : 0); setTarget (dubWetG, live ? clampd (fx.dubMix, 0, 1) * 1.15 : 0); }
     setTarget (rvHpF, std::max (20.0, fx.rvHp)); setTarget (rvLpF, std::max (500.0, fx.rvLp));
 }
 
@@ -423,6 +432,15 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             }
             for (int c = 0; c < 2; ++c) { fsLoop.write (c, fsFbLp.tick (c, fsFbDelay.read (c, 0.018))); o[c] = o[c] * fd + sh[c] * fw; }
             fsFbDelay.advance(); fsLoop.advance();
+        }
+        {   // DUB SPACE ECHO
+            const float ds = (float) dubSendG.next(), dw = (float) dubWetG.next(), dg = (float) dubFbG.next(); const double tl = dubTL.next(), tr = dubTR.next();
+            dubHp.coeffs (210, 1); dubLp.coeffs (1850, 1);
+            float y[2], sat[2];
+            for (int c = 0; c < 2; ++c) { y[c] = dubLp.tick (c, dubHp.tick (c, dubD.read (c, c ? tr : tl))); sat[c] = wa::shapeCurve (dubCurve, y[c]) * dg; }
+            dubD.write (0, o[0] * ds + dubLoop.read (1)); dubD.write (1, o[1] * ds + sat[0]); dubLoop.write (1, sat[1]);
+            dubD.advance(); dubLoop.advance();
+            for (int c = 0; c < 2; ++c) o[c] += y[c] * dw;
         }
         {   // ANALOG TAPE
             const float td = (float) tpDryG.next(), tw = (float) tpWetG.next(); const double wow = tpWowG.next();

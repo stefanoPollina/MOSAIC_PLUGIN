@@ -58,7 +58,8 @@ struct USeq { bool present = false, on = false, retrig = false; std::vector<int>
 struct State
 {
     bool present = false;
-    double bendRange = NaN, detune = NaN, unison = NaN, bpm = NaN, duck = NaN, duckRel = NaN, duckShape = NaN;   // duck: the 1/4-note sidechain pump (fx.duckDepth)
+    double bendRange = NaN, detune = NaN, unison = NaN, bpm = NaN, duck = NaN, duckRel = NaN, duckShape = NaN;
+    bool fgOn = false; int fgSteps[16] {}; double fgCut = 0.42, fgRes = 0.35, fgDepth = 0.85;   // PSY FILTER GATE (state.fg)   // duck: the 1/4-note sidechain pump (fx.duckDepth)
     std::array<Lfo, 8> lfo {}; bool hasLfo = false;
     std::array<Lfo, 8> lfoB {}; bool hasLfoB = false;
     std::vector<ModSlot> mod; bool hasMod = false;
