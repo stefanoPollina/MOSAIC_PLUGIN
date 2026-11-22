@@ -240,7 +240,7 @@
   function addFollowButton() {
     const bounce = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'BOUNCE');
     if (!bounce || document.getElementById('mp-follow')) return !!bounce;
-    const b = document.createElement('button'); b.id = 'mp-follow'; b.type = 'button'; b.className = 'texty seq-bounce' + (follow ? ' on' : ''); b.textContent = 'FOLLOW HOST';
+    const b = document.createElement('button'); b.id = 'mp-follow'; b.type = 'button'; b.className = 'switch' + (follow ? ' on' : ''); b.textContent = 'FOLLOW HOST';
     b.title = 'On: pressing play in the DAW plays Mosaic\'s SEQ in time. Off: the DAW only plays what its MIDI clips send (use with BOUNCE MIDI clips).';
     b.onclick = () => { follow = !follow; b.classList.toggle('on', follow); try { localStorage.setItem('mosaic-seq-follows-host', follow ? '1' : '0'); } catch (e) { /* no storage */ }
       const seq = window.__mosaicSequencer; if (!follow && seq && seq.playing && hostPlaying) seq.stop(); };
