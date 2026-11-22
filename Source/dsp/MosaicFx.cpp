@@ -33,7 +33,9 @@ FxState FxState::fromJson (const json::Value& s)
     f.widthOn = x["widthOn"].truthy(); f.width = numD (x["width"], 1.3);
     f.rvToneOn = x["rvToneOn"].truthy(); f.rvHp = numD (x["rvHp"], 180); f.rvLp = numD (x["rvLp"], 9000);
     f.compOn = x["compOn"].truthy(); f.compThreshold = x["compThreshold"].numOr (0); f.compRatio = x["compRatio"].numOr (1); f.compAttack = x["compAttack"].numOr (0.001); f.compRelease = x["compRelease"].numOr (0.02);
-    f.mstOn = x["mstOn"].truthy(); f.mstMono = numD (x["mstMono"], 140); f.mstLowCut = numD (x["mstLowCut"], 30); f.mstAir = numD (x["mstAir"], 2.8); f.mstWarm = numD (x["mstWarm"], 0);
+    f.mstOn = x["mstOn"].truthy(); f.mstMono = numD (x["mstMono"], 140); f.mstLowCut = numD (x["mstLowCut"], 30); f.mstAir = numD (x["mstAir"], 2.8); f.mstWarm = numD (x["mstWarm"], 0); f.mstWidth = numD (x["mstWidth"], 1); f.mstTame = numD (x["mstTame"], 0);
+    f.fsOn = x["fsOn"].truthy(); f.fsShift = numD (x["fsShift"], 4); f.fsFb = numD (x["fsFb"], 0.25); f.fsMix = numD (x["fsMix"], 0.35);
+    f.tapeOn = x["tapeOn"].truthy(); f.tapeSat = numD (x["tapeSat"], 0.3); f.tapeHead = numD (x["tapeHead"], 0.45); f.tapeWow = numD (x["tapeWow"], 0.15);
     f.master = s["master"].numOr (0); f.bpm = s["seq"].isObject() && s["seq"]["bpm"].truthy() ? s["seq"]["bpm"].numOr (120) : 120;
     return f;
 }
@@ -76,7 +78,11 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     crushCurve.clear(); crushBits = 0; crushWet.init (0); crushDry.init (1);
     chRate.init (0.35); chDepthL.init (1); chDepthR.init (1); chWet.init (0); bq (chHp, wa::BiquadType::highpass); chHpF.init (250); chDelay.prepare (sr, 0.05, false); chPh = 0;
     tremRate.init (4); tremAmt.init (0); tremGain.init (1); panAmt.init (0); tremPh = 0; wSideL.init (0.5); wSideR.init (-0.5);
-    mstDry.init (1); mstWet.init (0); bq (mstHp, wa::BiquadType::highpass); mstHpF.init (30); bq (mstShelf, wa::BiquadType::highshelf); mstAirDb.init (2.8); bq (mstWarm, wa::BiquadType::lowpass); mstWarmF.init (16000);
+    mstDry.init (1); mstWet.init (0); bq (mstHp, wa::BiquadType::highpass); mstHpF.init (30); bq (mstShelf, wa::BiquadType::highshelf); mstAirDb.init (2.8); bq (mstWarm, wa::BiquadType::lowpass); mstWarmF.init (16000); bq (mstTame, wa::BiquadType::highshelf); mstTameDb.init (0); mstWidthG.init (1);
+    { const double A[4] = { 0.6923878, 0.9360654322959, 0.9882295226860, 0.9987488452737 }, B[4] = { 0.4021921162426, 0.8561710882420, 0.9722909545651, 0.9952884791278 };
+      for (int k = 0; k < 4; ++k) { hilI[k] = HilSec(); hilI[k].a2 = A[k] * A[k]; hilQ[k] = HilSec(); hilQ[k].a2 = B[k] * B[k]; } }
+    hilDelay[0] = hilDelay[1] = 0; fsPh = 0; fsHz.init (0); fsDryG.init (1); fsWetG.init (0); fsFbG.init (0); fsFbDelay.prepare (sr, 0.2, true); bq (fsFbLp, wa::BiquadType::lowpass); fsLoop.reset();
+    tpShaper.reset(); tpCurveK = -1; tpPh = 0; bq (tpHead, wa::BiquadType::lowpass); tpHeadF.init (10000); tpWowG.init (0); tpDryG.init (1); tpWetG.init (0); tpWowD.prepare (sr, 0.05, false);
     bq (mstSide1, wa::BiquadType::highpass); bq (mstSide2, wa::BiquadType::highpass); mstMonoF.init (140);
     ppIn.init (0); bq (ppHp, wa::BiquadType::highpass); ppHpF.init (300); bq (ppLp, wa::BiquadType::lowpass); ppLpF.init (3500);
     ppL.prepare (sr, 2, true); ppR.prepare (sr, 2, true); ppL.monoFirstQuantum = ppR.monoFirstQuantum = true; ppLoop.reset(); ppTime.init (0); ppFb.init (0.35); ppWet.init (0);
@@ -191,7 +197,12 @@ void MosaicFx::applyBus (double beat)
     setTarget (ppFb, ppOn ? std::min (0.85, std::max (0.0, fx.ppFb)) : 0);
     setTarget (ppLpF, std::max (200.0, fx.ppLp)); setTarget (ppHpF, std::max (20.0, fx.ppHp));
     setTarget (mstDry, fx.mstOn ? 0 : 1); setTarget (mstWet, fx.mstOn ? 1 : 0);
-    setTarget (mstHpF, clampd (fx.mstLowCut, 20, 65)); setTarget (mstMonoF, clampd (fx.mstMono, 60, 260)); setTarget (mstAirDb, clampd (fx.mstAir, 0, 8)); setTarget (mstWarmF, 16000 - clampd (fx.mstWarm, 0, 1) * 11500);
+    setTarget (mstHpF, clampd (fx.mstLowCut, 20, 65)); setTarget (mstMonoF, clampd (fx.mstMono, 60, 260)); setTarget (mstAirDb, clampd (fx.mstAir, 0, 8)); setTarget (mstWarmF, 16000 - clampd (fx.mstWarm, 0, 1) * 11500); setTarget (mstWidthG, clampd (fx.mstWidth, 0, 2)); setTarget (mstTameDb, -8 * clampd (fx.mstTame, 0, 1));
+    { const double mix = clampd (fx.fsMix, 0, 1); setTarget (fsHz, clampd (fx.fsShift, -45, 45)); setTarget (fsDryG, fx.fsOn ? 1 - mix * 0.45 : 1); setTarget (fsWetG, fx.fsOn ? mix : 0); setTarget (fsFbG, fx.fsOn ? clampd (fx.fsFb, 0, 1) * 0.65 : 0); }
+    { const double k = 1 + clampd (fx.tapeSat, 0, 1) * 5.5;
+      if (std::abs (k - tpCurveK) > 1e-6) { tpCurveK = k; const int n = 2048; tpCurve.assign ((size_t) n, 0.f); for (int i = 0; i < n; ++i) tpCurve[(size_t) i] = (float) (std::tanh (((double) i * 2 / (n - 1) - 1) * k) / k); }
+      setTarget (tpHeadF, 4500 + (1 - clampd (fx.tapeHead, 0, 1)) * 11500); setTarget (tpWowG, fx.tapeOn ? clampd (fx.tapeWow, 0, 1) * 0.0012 : 0);
+      setTarget (tpDryG, fx.tapeOn ? 0 : 1); setTarget (tpWetG, fx.tapeOn ? 1 : 0); }
     setTarget (rvHpF, std::max (20.0, fx.rvHp)); setTarget (rvLpF, std::max (500.0, fx.rvLp));
 }
 
@@ -396,12 +407,37 @@ void MosaicFx::process (float* L, float* R, int n, double now)
         const float bd = (float) busDry.next(), bwg = (float) busWet.next();
         float o[2] = { sum[0] * bd + bw[0] * bwg, sum[1] * bd + bw[1] * bwg };
         comp.tick (o[0], o[1]);
+        {   // PSY FREQ SHIFT
+            const double hz = fsHz.next(); const float fd = (float) fsDryG.next(), fw = (float) fsWetG.next(), fg = (float) fsFbG.next();
+            const float cv = (float) std::cos (2 * wa::PI * fsPh), sv = (float) std::sin (2 * wa::PI * fsPh);
+            fsPh += hz / sr; fsPh -= std::floor (fsPh);
+            fsFbLp.coeffs (2200, 1);
+            float sh[2];
+            for (int c = 0; c < 2; ++c)
+            {
+                const float in = o[c] + fsLoop.read (c) * fg;
+                float vi = hilDelay[c]; hilDelay[c] = in; float vq = in;
+                for (int k = 0; k < 4; ++k) { vi = hilI[k].tick (c, vi); vq = hilQ[k].tick (c, vq); }
+                sh[c] = vi * cv + vq * sv;
+                fsFbDelay.write (c, sh[c]);
+            }
+            for (int c = 0; c < 2; ++c) { fsLoop.write (c, fsFbLp.tick (c, fsFbDelay.read (c, 0.018))); o[c] = o[c] * fd + sh[c] * fw; }
+            fsFbDelay.advance(); fsLoop.advance();
+        }
+        {   // ANALOG TAPE
+            const float td = (float) tpDryG.next(), tw = (float) tpWetG.next(); const double wow = tpWowG.next();
+            tpHead.coeffs (tpHeadF.next(), -3.0103);
+            const double dt = 0.008 + wow * std::sin (2 * wa::PI * tpPh); tpPh += 1.4 / sr; tpPh -= std::floor (tpPh);
+            float w[2]; for (int c = 0; c < 2; ++c) { tpWowD.write (c, tpHead.tick (c, tpShaper.tick (c, o[c], tpCurve))); w[c] = tpWowD.read (c, dt); }
+            tpShaper.advance(); tpWowD.advance();
+            for (int c = 0; c < 2; ++c) o[c] = o[c] * td + w[c] * tw;
+        }
         {
             const float md = (float) mstDry.next(), mw = (float) mstWet.next();
             const double hpF = mstHpF.next(), monoF = mstMonoF.next(), airDb = mstAirDb.next();
-            mstHp.coeffs (hpF, -3.0103); mstShelf.coeffs (8500, airDb); mstWarm.coeffs (mstWarmF.next(), -3.0103); mstSide1.coeffs (monoF, -3.0103); mstSide2.coeffs (monoF, -3.0103);
-            float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstWarm.tick (c, mstShelf.tick (c, mstHp.tick (c, o[c])));
-            const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f));
+            mstHp.coeffs (hpF, -3.0103); mstShelf.coeffs (8500, airDb); mstWarm.coeffs (mstWarmF.next(), -3.0103); mstTame.coeffs (3200, mstTameDb.next()); mstSide1.coeffs (monoF, -3.0103); mstSide2.coeffs (monoF, -3.0103);
+            float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstTame.tick (c, mstWarm.tick (c, mstShelf.tick (c, mstHp.tick (c, o[c]))));
+            const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f)) * (float) mstWidthG.next();
             if (mw > 0) { o[0] = o[0] * md + (mid + side) * mw; o[1] = o[1] * md + (mid - side) * mw; }
         }
         limiter.tick (o[0], o[1]);

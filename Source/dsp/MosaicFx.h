@@ -25,7 +25,9 @@ struct FxState
     bool crushOn = false; double crushBits = 8, crushMix = 0.5; bool tremOn = false; std::string tremMode = "trem", tremSync = "1/8"; double tremDepth = 0.5;
     bool widthOn = false; double width = 1.3; bool rvToneOn = false; double rvHp = 180, rvLp = 9000;
     bool compOn = false; double compThreshold = -18, compRatio = 3, compAttack = 0.01, compRelease = 0.2;
-    bool mstOn = false; double mstMono = 140, mstLowCut = 30, mstAir = 2.8, mstWarm = 0;   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
+    bool mstOn = false; double mstMono = 140, mstLowCut = 30, mstAir = 2.8, mstWarm = 0, mstWidth = 1, mstTame = 0;
+    bool fsOn = false; double fsShift = 4, fsFb = 0.25, fsMix = 0.35;          // PSY FREQ SHIFT (single-sideband, Hz)
+    bool tapeOn = false; double tapeSat = 0.3, tapeHead = 0.45, tapeWow = 0.15; // ANALOG TAPE   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
     double master = 0.8, bpm = 120;
     static FxState fromJson (const json::Value& fullState);   // reads state.fx, state.master, state.seq.bpm as applyFx does
 };
@@ -78,7 +80,14 @@ private:
     // dynamics + output
     wa::Compressor comp, limiter; std::vector<float> safetyCurve; wa::Param master;
     // PSY MASTER (between compressor and limiter): low cut -> air shelf -> mid/side with the side high-passed below the mono frequency
-    wa::Biquad mstHp, mstShelf, mstWarm, mstSide1, mstSide2; wa::Param mstDry, mstWet, mstHpF, mstMonoF, mstAirDb, mstWarmF;
+    wa::Biquad mstHp, mstShelf, mstWarm, mstTame, mstSide1, mstSide2; wa::Param mstDry, mstWet, mstHpF, mstMonoF, mstAirDb, mstWarmF, mstWidthG, mstTameDb;
+    // PSY FREQ SHIFT: two 4-section allpass chains (y = a²x - x[n-2] + a²y[n-2]) make a 90-degree pair, mixed with a cosine/sine carrier;
+    // an 18 ms feedback loop low-passed at 2.2 kHz (a cycle, so it runs a quantum late as in Chrome)
+    struct HilSec { double a2 = 0, x1[2] {}, x2[2] {}, y1[2] {}, y2[2] {};
+                    float tick (int c, float x) { const double y = a2 * x - x2[c] + a2 * y2[c]; x2[c] = x1[c]; x1[c] = x; y2[c] = y1[c]; y1[c] = y; return (float) y; } };
+    HilSec hilI[4], hilQ[4]; float hilDelay[2] {}; double fsPh = 0; wa::Param fsHz, fsDryG, fsWetG, fsFbG; wa::Delay fsFbDelay; wa::Biquad fsFbLp; wa::Lag128 fsLoop;
+    // ANALOG TAPE: tanh/k curve through Chrome's 2x oversampled shaper -> head low-pass -> 8 ms delay with slow wow
+    wa::Shaper2x tpShaper; std::vector<float> tpCurve; double tpCurveK = -1, tpPh = 0; wa::Biquad tpHead; wa::Param tpHeadF, tpWowG, tpDryG, tpWetG; wa::Delay tpWowD;
     long long frame = 0;
     void setTarget (wa::Param& p, double v) { p.setTarget (v, 0.03, sr); }
     void applyBus (double beat);
