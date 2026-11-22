@@ -32,6 +32,14 @@ struct FxState
     bool ensOn = false; double ensRate = 0.32, ensDepth = 0.55, ensMix = 0.42;  // ENSEMBLE
     bool springOn = false; double springBoing = 0.55, springDecay = 0.5, springMix = 0.32;  // SPRING TANK
     bool dubOn = false, dubThrow = false; double dubDiv = 1, dubFb = 0.58, dubMix = 0.38;   // DUB SPACE ECHO   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
+    bool rotOn = false; double rotSpeed = 0.35, rotDepth = 0.65, rotMix = 0.55;      // VINTAGE ROTARY
+    bool vowOn = false; double vowPos = 0.35, vowRate = 0.28, vowRes = 0.55;          // VOWEL MORPH
+    bool apOn = false; double apDiv = 0.5, apDepth = 0.7, apShape = 0.25;             // STEREO AUTO-PAN
+    bool bpOn = false; double bpRate = 0.58, bpFb = 0.48, bpMix = 0.45;               // BARBERPOLE PHASER
+    bool rtOn = false; double rtTune = 0.28, rtColor = 0.45, rtMix = 0.35;            // WARM RING TREM
+    bool tcOn = false; double tcSub = 0.45, tcTube = 0.35, tcSilk = 0.35;             // TUBE CONSOLE
+    bool nyOn = false; double nySmash = 0.65, nyBody = 0.45, nyMix = 0.3;             // NY PARALLEL GLUE
+    bool tlOn = false, tlMono = false; double tlAngle = 0.38, tlFocus = 0.4, tlTrim = 0.5;   // MASTER TILT & MONO
     bool sirOn = false, sirHold = false; double sirDub = 0.55, sirGrit = 0.45, sirMix = 0.45;    // DUB SIREN
     bool djOn = false, djKillLow = false, djKillMid = false, djKillHigh = false; double djHpf = 0, djLpf = 1, djCeil = 0.79;  // DJ ISOLATOR
     double master = 0.8, bpm = 120;
@@ -105,6 +113,16 @@ private:
     double srPh = 0, srWob = 0, srF = 560, srG = 0, srRelT = 0; bool srHeld = false, srHoldNow = false;
     // DJ ISOLATOR (after PSY MASTER, before the limiter): crossfade onto a 3-band LR4 split when a band is killed, then DJ HPF / LPF
     wa::Biquad isoL1, isoL2, isoM1, isoM2, isoM3, isoM4, isoH1, isoH2, isoHp, isoLp; wa::Param isoDry, isoBands, isoLoG, isoMidG, isoHiG, isoHpF, isoLpF;
+    // MOTION after ENSEMBLE: rotary -> vowel morph -> auto-pan -> barberpole -> ring trem
+    wa::Biquad rotLp; wa::Delay rotD; double rotPh = 0; wa::Param rotHz, rotDepG, rotAmG, rotWetG, rotDryG;
+    wa::Biquad vowF1, vowF2, vowBody; double vowPh = 0; wa::Param vowB1, vowB2, vowQ, vowHz, vowM1, vowM2, vowWetG, vowDryG;
+    wa::Biquad apLo1, apLo2, apHi1, apHi2; double apPh = 0; bool apTri = false; wa::Param apHz, apDepG, apWetG, apDryG;
+    wa::Biquad bpAp[6], bpLp; wa::Lag128 bpLoop; double bpPhase = 0, bpSpeed = 0; int bpCount = 0; wa::Param bpFbG, bpWetG, bpDryG;
+    wa::Biquad rtPre, rtPost; double rtPh = 0; wa::Param rtHz, rtDepG, rtPostF, rtWetG, rtDryG;
+    // MASTER between PSY MASTER and DJ ISOLATOR: tube console -> NY parallel glue -> tilt & mono
+    wa::Biquad tcShelf, tcSilk; wa::Shaper2x tcShaper; std::vector<float> tcCurve; double tcKey = -1; wa::Param tcSubDb, tcSilkF, tcWetG, tcDryG;
+    wa::Biquad nyLp; wa::Compressor nyComp; wa::Param nyLpF, nyWetG;
+    wa::Biquad tlLow, tlHigh, tlFocus; wa::Param tlLowDb, tlHighDb, tlFocusDb, tlWetG, tlDryG, tlPassG, tlSumG, tlTrimG;
     long long frame = 0;
     void setTarget (wa::Param& p, double v) { p.setTarget (v, 0.03, sr); }
     void applyBus (double beat);

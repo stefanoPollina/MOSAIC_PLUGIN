@@ -46,17 +46,17 @@ struct Param
     }
 };
 
-enum class BiquadType { lowpass, highpass, bandpass, allpass, notch, highshelf };   // highshelf: the Q argument carries the gain in dB, as WebAudio's gain
+enum class BiquadType { lowpass, highpass, bandpass, allpass, notch, highshelf, lowshelf, peaking };   // lowshelf: Q carries the gain in dB; peaking: Q is Q, gain in peakDb   // highshelf: the Q argument carries the gain in dB, as WebAudio's gain
 struct Biquad
 {
     BiquadType type = BiquadType::lowpass;
     double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, x1[2] {}, x2[2] {}, y1[2] {}, y2[2] {};
-    double lastF = -1, lastQ = -1, sr = 48000;
+    double lastF = -1, lastQ = -1, sr = 48000, peakDb = 0, lastG = 1e9;
     void reset() { for (int c = 0; c < 2; ++c) x1[c] = x2[c] = y1[c] = y2[c] = 0; }
     void coeffs (double freq, double Q)
     {
-        if (freq == lastF && Q == lastQ) return;
-        lastF = freq; lastQ = Q;
+        if (freq == lastF && Q == lastQ && peakDb == lastG) return;
+        lastF = freq; lastQ = Q; lastG = peakDb;
         const double nyq = sr * 0.5, f = std::max (0.0, std::min (1.0, freq / nyq));
         auto set = [&] (double B0, double B1, double B2, double A0, double A1, double A2) { const double inv = 1 / A0; b0 = B0 * inv; b1 = B1 * inv; b2 = B2 * inv; a1 = A1 * inv; a2 = A2 * inv; };
         switch (type)
@@ -84,6 +84,17 @@ struct Biquad
                 else if (f <= 0) { const double A2 = std::pow (10.0, Q / 20); set (A2, 0, 0, 1, 0, 0); }
                 else { const double A = std::pow (10.0, Q / 40), w = PI * f, al = std::sin (w) / 2 * std::sqrt (2.0), k = std::cos (w), sa = 2 * std::sqrt (A) * al;
                        set (A * ((A + 1) + (A - 1) * k + sa), -2 * A * ((A - 1) + (A + 1) * k), A * ((A + 1) + (A - 1) * k - sa), (A + 1) - (A - 1) * k + sa, 2 * ((A - 1) - (A + 1) * k), (A + 1) - (A - 1) * k - sa); }
+                break;
+            case BiquadType::lowshelf:    // WebAudio lowshelf (S = 1)
+                if (f >= 1) { const double A2 = std::pow (10.0, Q / 20); set (A2, 0, 0, 1, 0, 0); }
+                else if (f <= 0) set (1, 0, 0, 1, 0, 0);
+                else { const double A = std::pow (10.0, Q / 40), w = PI * f, al = std::sin (w) / 2 * std::sqrt (2.0), k = std::cos (w), sa = 2 * std::sqrt (A) * al;
+                       set (A * ((A + 1) - (A - 1) * k + sa), 2 * A * ((A - 1) - (A + 1) * k), A * ((A + 1) - (A - 1) * k - sa), (A + 1) + (A - 1) * k + sa, -2 * ((A - 1) + (A + 1) * k), (A + 1) + (A - 1) * k - sa); }
+                break;
+            case BiquadType::peaking:
+                if (f > 0 && f < 1) { const double A = std::pow (10.0, peakDb / 40);
+                    if (Q > 0) { const double w = PI * f, al = std::sin (w) / (2 * Q), k = std::cos (w); set (1 + al * A, -2 * k, 1 - al * A, 1 + al / A, -2 * k, 1 - al / A); } else set (A * A, 0, 0, 1, 0, 0); }
+                else set (1, 0, 0, 1, 0, 0);
                 break;
             case BiquadType::notch:
                 if (f > 0 && f < 1) { if (Q > 0) { const double w = PI * f, al = std::sin (w) / (2 * Q), k = std::cos (w); set (1, -2 * k, 1, 1 + al, -2 * k, 1 - al); } else set (0, 0, 0, 1, 0, 0); }

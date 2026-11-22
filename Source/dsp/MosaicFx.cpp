@@ -38,6 +38,14 @@ FxState FxState::fromJson (const json::Value& s)
     f.lofiOn = x["lofiOn"].truthy(); f.lofiGrit = numD (x["lofiGrit"], 0.35); f.lofiBits = numD (x["lofiBits"], 0.4); f.lofiLp = numD (x["lofiLp"], 0.45);
     f.ensOn = x["ensOn"].truthy(); f.ensRate = numD (x["ensRate"], 0.32); f.ensDepth = numD (x["ensDepth"], 0.55); f.ensMix = numD (x["ensMix"], 0.42);
     f.springOn = x["springOn"].truthy(); f.springBoing = numD (x["springBoing"], 0.55); f.springDecay = numD (x["springDecay"], 0.5); f.springMix = numD (x["springMix"], 0.32);
+    f.rotOn = x["rotOn"].truthy(); f.rotSpeed = numD (x["rotSpeed"], 0.35); f.rotDepth = numD (x["rotDepth"], 0.65); f.rotMix = numD (x["rotMix"], 0.55);
+    f.vowOn = x["vowOn"].truthy(); f.vowPos = numD (x["vowPos"], 0.35); f.vowRate = numD (x["vowRate"], 0.28); f.vowRes = numD (x["vowRes"], 0.55);
+    f.apOn = x["apOn"].truthy(); f.apDiv = numD (x["apDiv"], 0.5); f.apDepth = numD (x["apDepth"], 0.7); f.apShape = numD (x["apShape"], 0.25);
+    f.bpOn = x["bpOn"].truthy(); f.bpRate = numD (x["bpRate"], 0.58); f.bpFb = numD (x["bpFb"], 0.48); f.bpMix = numD (x["bpMix"], 0.45);
+    f.rtOn = x["rtOn"].truthy(); f.rtTune = numD (x["rtTune"], 0.28); f.rtColor = numD (x["rtColor"], 0.45); f.rtMix = numD (x["rtMix"], 0.35);
+    f.tcOn = x["tcOn"].truthy(); f.tcSub = numD (x["tcSub"], 0.45); f.tcTube = numD (x["tcTube"], 0.35); f.tcSilk = numD (x["tcSilk"], 0.35);
+    f.nyOn = x["nyOn"].truthy(); f.nySmash = numD (x["nySmash"], 0.65); f.nyBody = numD (x["nyBody"], 0.45); f.nyMix = numD (x["nyMix"], 0.3);
+    f.tlOn = x["tlOn"].truthy(); f.tlMono = x["tlMono"].truthy(); f.tlAngle = numD (x["tlAngle"], 0.38); f.tlFocus = numD (x["tlFocus"], 0.4); f.tlTrim = numD (x["tlTrim"], 0.5);
     f.sirOn = x["sirOn"].truthy(); f.sirHold = x["sirHold"].truthy(); f.sirDub = numD (x["sirDub"], 0.55); f.sirGrit = numD (x["sirGrit"], 0.45); f.sirMix = numD (x["sirMix"], 0.45);
     f.djOn = x["djOn"].truthy(); f.djKillLow = x["djKillLow"].truthy(); f.djKillMid = x["djKillMid"].truthy(); f.djKillHigh = x["djKillHigh"].truthy();
     f.djHpf = numD (x["djHpf"], 0); f.djLpf = numD (x["djLpf"], 1); f.djCeil = numD (x["djCeil"], 0.79);
@@ -94,6 +102,17 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     spD.prepare (sr, 0.5, true); spLoop.reset(); spSendG.init (0); spWetG.init (0); spFbG.init (0); spQ.init (4.25);
     enD.prepare (sr, 0.05, false); bq (enLp, wa::BiquadType::lowpass); enPh1 = enPh2 = 0; enRateP.init (0.868); enDepthP.init (0); enDryG.init (1); enWetG.init (0);
     dubD.prepare (sr, 2, true); bq (dubHp, wa::BiquadType::highpass); bq (dubLp, wa::BiquadType::lowpass); dubLoop.reset();
+    bq (rotLp, wa::BiquadType::lowpass); rotD.prepare (sr, 0.05, false); rotPh = 0; rotHz.init (1.8); rotDepG.init (0); rotAmG.init (0); rotWetG.init (0); rotDryG.init (1);
+    bq (vowF1, wa::BiquadType::bandpass); bq (vowF2, wa::BiquadType::bandpass); bq (vowBody, wa::BiquadType::lowpass); vowPh = 0;
+    vowB1.init (450); vowB2.init (1100); vowQ.init (4.5); vowHz.init (0.4); vowM1.init (0); vowM2.init (0); vowWetG.init (0); vowDryG.init (1);
+    for (auto* b : { &apLo1, &apLo2 }) bq (*b, wa::BiquadType::lowpass); for (auto* b : { &apHi1, &apHi2 }) bq (*b, wa::BiquadType::highpass); apPh = 0; apHz.init (1); apDepG.init (0); apWetG.init (0); apDryG.init (1);
+    for (int i = 0; i < 6; ++i) { bq (bpAp[i], wa::BiquadType::allpass); bpAp[i].coeffs (160 * std::pow (14.0, i / 6.0), 1.6); } bq (bpLp, wa::BiquadType::lowpass); bpLoop.reset(); bpPhase = 0; bpCount = 0; bpFbG.init (0); bpWetG.init (0); bpDryG.init (1);
+    bq (rtPre, wa::BiquadType::lowpass); bq (rtPost, wa::BiquadType::lowpass); rtPh = 0; rtHz.init (55); rtDepG.init (0); rtPostF.init (1800); rtWetG.init (0); rtDryG.init (1);
+    bq (tcShelf, wa::BiquadType::lowshelf); bq (tcSilk, wa::BiquadType::lowpass); tcShaper.reset(); tcKey = -1; tcSubDb.init (2.7); tcSilkF.init (11000); tcWetG.init (0); tcDryG.init (1);
+    bq (nyLp, wa::BiquadType::lowpass); nyLpF.init (3200); nyWetG.init (0);
+    nyComp.prepare (sr); nyComp.threshold.init (-25); nyComp.knee.init (6); nyComp.ratio.init (12); nyComp.attack.init (0.008); nyComp.release.init (0.14);
+    bq (tlLow, wa::BiquadType::lowshelf); bq (tlHigh, wa::BiquadType::highshelf); bq (tlFocus, wa::BiquadType::peaking);
+    tlLowDb.init (0); tlHighDb.init (0); tlFocusDb.init (0); tlWetG.init (0); tlDryG.init (1); tlPassG.init (1); tlSumG.init (0); tlTrimG.init (1);
     bq (srBp, wa::BiquadType::bandpass); bq (srLp, wa::BiquadType::lowpass); srD.prepare (sr, 0.5, true); srKeyL = srKeyD = -1; srBpF.init (790); srFbG.init (0); srWetG.init (0);
     srPh = srWob = 0; srF = 560; srG = 0; srRelT = 0; srHeld = srHoldNow = false;
     for (auto* b : { &isoL1, &isoL2, &isoM3, &isoM4, &isoLp }) bq (*b, wa::BiquadType::lowpass);
@@ -234,6 +253,32 @@ void MosaicFx::applyBus (double beat)
       setTarget (dubTL, tl); setTarget (dubTR, std::min (1.9, tl * 1.333));
       const bool live = fx.dubOn || fx.dubThrow; setTarget (dubFbG, fx.dubThrow ? 0.94 : fx.dubOn ? clampd (fx.dubFb, 0, 1) * 0.86 : 0);
       setTarget (dubSendG, live ? 1 : 0); setTarget (dubWetG, live ? clampd (fx.dubMix, 0, 1) * 1.15 : 0); }
+    {   // MOTION after ENSEMBLE
+      const double beatS = 60.0 / std::max (40.0, std::min (240.0, fx.bpm));
+      const double rd = clampd (fx.rotDepth, 0, 1), rm = clampd (fx.rotMix, 0, 1);
+      setTarget (rotHz, 0.4 + std::pow (clampd (fx.rotSpeed, 0, 1), 1.8) * 6.8); setTarget (rotDepG, fx.rotOn ? rd * 0.0018 : 0); setTarget (rotAmG, fx.rotOn ? rd * 0.35 : 0);
+      setTarget (rotWetG, fx.rotOn ? rm : 0); setTarget (rotDryG, fx.rotOn ? 1 - rm * 0.45 : 1);
+      const double vp = clampd (fx.vowPos, 0, 1), vr = clampd (fx.vowRate, 0, 1); const bool manual = vr < 0.04;
+      setTarget (vowB1, 280 + vp * 460); setTarget (vowB2, 820 + vp * 1050); setTarget (vowQ, 2.5 + clampd (fx.vowRes, 0, 1) * 7.5);
+      setTarget (vowHz, manual ? 0.001 : 0.08 + std::pow (vr, 1.6) * 3.5); setTarget (vowM1, manual ? 0 : 160); setTarget (vowM2, manual ? 0 : 420);
+      setTarget (vowWetG, fx.vowOn ? 0.85 : 0); setTarget (vowDryG, fx.vowOn ? 0.25 : 1);
+      static const double PER[5] = { 0.5, 0.75, 1, 2, 4 }; const int idx = std::min (4, (int) std::floor (clampd (fx.apDiv, 0, 1) * 4.99));
+      apTri = clampd (fx.apShape, 0, 1) > 0.5; setTarget (apHz, 1 / (beatS * PER[idx])); setTarget (apDepG, fx.apOn ? clampd (fx.apDepth, 0, 1) * 0.48 : 0);
+      setTarget (apWetG, fx.apOn ? 1 : 0); setTarget (apDryG, fx.apOn ? 0 : 1);
+      const double bm = clampd (fx.bpMix, 0, 1); setTarget (bpFbG, fx.bpOn ? clampd (fx.bpFb, 0, 1) * 0.72 : 0); setTarget (bpWetG, fx.bpOn ? bm : 0); setTarget (bpDryG, fx.bpOn ? 1 - bm * 0.35 : 1);
+      bpSpeed = fx.bpOn ? (clampd (fx.bpRate, 0, 1) - 0.5) * 1.4 : 0;
+      const double rtm = clampd (fx.rtMix, 0, 1); setTarget (rtHz, 2 + std::pow (clampd (fx.rtTune, 0, 1), 2.2) * 218); setTarget (rtDepG, fx.rtOn ? 0.85 : 0);
+      setTarget (rtPostF, 900 + clampd (fx.rtColor, 0, 1) * 2100); setTarget (rtWetG, fx.rtOn ? rtm : 0); setTarget (rtDryG, fx.rtOn ? 1 - rtm * 0.4 : 1); }
+    {   // MASTER trio
+      const double tt = clampd (fx.tcTube, 0, 1);
+      if (std::abs (tt - tcKey) > 1e-6) { tcKey = tt; const double k = 1 + tt * 4.2; tcCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) { const double x = (double) i * 2 / 2047 - 1; tcCurve[(size_t) i] = (float) (std::tanh ((x + 0.08 * tt * x * x) * k) / k * (k / (1 + (k - 1) * 0.6))); } }
+      setTarget (tcSubDb, clampd (fx.tcSub, 0, 1) * 6); setTarget (tcSilkF, 5500 + (1 - clampd (fx.tcSilk, 0, 1)) * 10500); setTarget (tcWetG, fx.tcOn ? 1 : 0); setTarget (tcDryG, fx.tcOn ? 0 : 1);
+      const double smv = clampd (fx.nySmash, 0, 1); setTarget (nyComp.ratio, 4 + smv * 12); setTarget (nyComp.threshold, -16 - smv * 14);
+      setTarget (nyLpF, 1600 + (1 - clampd (fx.nyBody, 0, 1)) * 3200); setTarget (nyWetG, fx.nyOn ? clampd (fx.nyMix, 0, 1) * 0.85 : 0);
+      const double tilt = (clampd (fx.tlAngle, 0, 1) - 0.5) * 10; const bool mono = fx.tlOn && fx.tlMono;
+      setTarget (tlLowDb, -tilt); setTarget (tlHighDb, std::min (3.5, tilt * 0.75)); setTarget (tlFocusDb, clampd (fx.tlFocus, 0, 1) * 4.5);
+      setTarget (tlWetG, fx.tlOn ? 1 : 0); setTarget (tlDryG, fx.tlOn ? 0 : 1); setTarget (tlPassG, mono ? 0 : 1); setTarget (tlSumG, mono ? 1 : 0);
+      setTarget (tlTrimG, std::pow (10.0, (fx.tlOn ? (clampd (fx.tlTrim, 0, 1) - 0.5) * 12 : 0) / 20)); }
     {   // DUB SIREN
       const double sd = clampd (fx.sirDub, 0, 1), sg = clampd (fx.sirGrit, 0, 1), lv = std::max (4.0, std::round (64 - (0.25 + sg * 0.55) * 56)), dr = 1 + sg * 3.5; const bool live = fx.sirOn || fx.sirHold;
       if (lv != srKeyL || std::abs (dr - srKeyD) > 1e-9) { srKeyL = lv; srKeyD = dr; srCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) srCurve[(size_t) i] = (float) (std::round (std::tanh (((double) i * 2 / 2047 - 1) * dr) / dr * lv) / lv); }
@@ -326,7 +371,7 @@ void MosaicFx::process (float* L, float* R, int n, double now)
         if (std::abs (d) < 0.004) { driveAmount = driveTarget; driveCurve = makeCurve (driveAmount); driveRamping = false; break; }
         driveAmount += d * 0.22; driveCurve = makeCurve (driveAmount); driveNextStep += 0.008;
     }
-    comp.quantumStart (n); limiter.quantumStart (n);
+    comp.quantumStart (n); limiter.quantumStart (n); nyComp.quantumStart (n);
 
     // AIR taps read the past (their delay is at least one quantum inside the reverb loop)
     for (int i = 0; i < n; ++i)
@@ -499,6 +544,38 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             const float wl = enLp.tick (0, enD.read (0, 0.008 + d * l1)), wr = enLp.tick (1, enD.read (1, 0.011 - d * l2)); enD.advance();
             o[0] = o[0] * ed + wl * ew; o[1] = o[1] * ed + wr * ew;
         }
+        {   // VINTAGE ROTARY
+            const double l = std::sin (2 * wa::PI * rotPh), dep = rotDepG.next(), am = rotAmG.next(); rotPh += rotHz.next() / sr; rotPh -= std::floor (rotPh);
+            const float rw = (float) rotWetG.next(), rdr = (float) rotDryG.next(); rotLp.coeffs (3200, 1);
+            for (int c = 0; c < 2; ++c) rotD.write (c, rotLp.tick (c, o[c]));
+            const float wl = rotD.read (0, 0.006 + dep * l) * (float) (1 + am * l), wr = rotD.read (1, 0.006 - dep * l) * (float) (1 - am * l); rotD.advance();
+            o[0] = o[0] * rdr + wl * rw; o[1] = o[1] * rdr + wr * rw;
+        }
+        {   // VOWEL MORPH
+            const double l = std::sin (2 * wa::PI * vowPh); vowPh += vowHz.next() / sr; vowPh -= std::floor (vowPh);
+            const double q = vowQ.next(); vowF1.coeffs (std::max (20.0, vowB1.next() + vowM1.next() * l), q); vowF2.coeffs (std::max (20.0, vowB2.next() + vowM2.next() * l), q * 1.1); vowBody.coeffs (900, 1);
+            const float vw = (float) vowWetG.next(), vd = (float) vowDryG.next();
+            for (int c = 0; c < 2; ++c) o[c] = o[c] * vd + (vowF1.tick (c, o[c]) + vowF2.tick (c, o[c]) + vowBody.tick (c, o[c])) * vw;
+        }
+        {   // STEREO AUTO-PAN (lows below 160 Hz untouched)
+            const double w = apTri ? (apPh < 0.25 ? 4 * apPh : apPh < 0.75 ? 2 - 4 * apPh : 4 * apPh - 4) : std::sin (2 * wa::PI * apPh); apPh += apHz.next() / sr; apPh -= std::floor (apPh);
+            const double dep = apDepG.next(); const float aw = (float) apWetG.next(), ad = (float) apDryG.next();
+            for (auto* b : { &apLo1, &apLo2, &apHi1, &apHi2 }) b->coeffs (160, -3.0103);
+            for (int c = 0; c < 2; ++c) { const float lo = apLo2.tick (c, apLo1.tick (c, o[c])), hi = apHi2.tick (c, apHi1.tick (c, o[c]));
+                o[c] = o[c] * ad + (lo + hi * (float) (c ? 1 - dep * w : 1 + dep * w)) * aw; }
+        }
+        {   // BARBERPOLE PHASER
+            bpPhase += bpSpeed / sr; bpPhase -= std::floor (bpPhase);
+            if (++bpCount >= 16) { bpCount = 0; for (int i = 0; i < 6; ++i) { double p = bpPhase + i / 6.0; p -= std::floor (p); bpAp[i].coeffs (160 * std::pow (14.0, p), 1.6); } }
+            bpLp.coeffs (2800, 1); const float fb = (float) bpFbG.next(), bw = (float) bpWetG.next(), bd = (float) bpDryG.next();
+            for (int c = 0; c < 2; ++c) { float v = o[c] + bpLoop.read (c) * fb; for (auto& a : bpAp) v = a.tick (c, v); const float y = bpLp.tick (c, v); bpLoop.write (c, y); o[c] = o[c] * bd + y * bw; }
+            bpLoop.advance();
+        }
+        {   // WARM RING TREM
+            const double car = std::sin (2 * wa::PI * rtPh); rtPh += rtHz.next() / sr; rtPh -= std::floor (rtPh);
+            const float g = (float) (rtDepG.next() * car), rw = (float) rtWetG.next(), rdr = (float) rtDryG.next(); rtPre.coeffs (2600, 1); rtPost.coeffs (rtPostF.next(), 1);
+            for (int c = 0; c < 2; ++c) o[c] = o[c] * rdr + rtPost.tick (c, rtPre.tick (c, o[c]) * g) * rw;
+        }
         {   // DUB SIREN
             const float bw = (float) srWetG.next(), fb = (float) srFbG.next(); srBp.coeffs (srBpF.next(), 1.8); srLp.coeffs (2600, 1);
             if (srHoldNow != srHeld) { srHeld = srHoldNow; if (srHeld) srF = 560; else srRelT = 0.2; }
@@ -530,6 +607,21 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstTame.tick (c, mstWarm.tick (c, mstShelf.tick (c, mstHp.tick (c, o[c]))));
             const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f)) * (float) mstWidthG.next();
             if (mw > 0) { o[0] = o[0] * md + (mid + side) * mw; o[1] = o[1] * md + (mid - side) * mw; }
+        }
+        {   // TUBE CONSOLE
+            tcShelf.coeffs (55, tcSubDb.next()); tcSilk.coeffs (tcSilkF.next(), 0.55); const float tw = (float) tcWetG.next(), td = (float) tcDryG.next();
+            float y[2]; for (int c = 0; c < 2; ++c) y[c] = tcSilk.tick (c, tcShaper.tick (c, tcShelf.tick (c, o[c]), tcCurve)); tcShaper.advance();
+            for (int c = 0; c < 2; ++c) o[c] = o[c] * td + y[c] * tw;
+        }
+        {   // NY PARALLEL GLUE
+            nyLp.coeffs (nyLpF.next(), 1); float w0 = nyLp.tick (0, o[0]), w1 = nyLp.tick (1, o[1]); nyComp.tick (w0, w1);
+            const float nw = (float) nyWetG.next(); o[0] += w0 * nw; o[1] += w1 * nw;
+        }
+        {   // MASTER TILT & MONO
+            tlLow.coeffs (320, tlLowDb.next()); tlHigh.coeffs (1800, tlHighDb.next()); tlFocus.peakDb = tlFocusDb.next(); tlFocus.coeffs (95, 0.9);
+            const float tw = (float) tlWetG.next(), td = (float) tlDryG.next(), pass = (float) tlPassG.next(), sum = (float) tlSumG.next(), trim = (float) tlTrimG.next();
+            for (int c = 0; c < 2; ++c) o[c] = o[c] * td + tlFocus.tick (c, tlHigh.tick (c, tlLow.tick (c, o[c]))) * tw;
+            const float mid = (o[0] + o[1]) * 0.5f; o[0] = (o[0] * pass + mid * sum) * trim; o[1] = (o[1] * pass + mid * sum) * trim;
         }
         {   // DJ ISOLATOR
             const float idr = (float) isoDry.next(), ib = (float) isoBands.next(), gl = (float) isoLoG.next(), gm = (float) isoMidG.next(), gh = (float) isoHiG.next();
