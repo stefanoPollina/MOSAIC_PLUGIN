@@ -389,6 +389,15 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
     double cbDL = 0, cbDR = 0, cbFb = 0, cbMix = 0, cbA = 0;
     if (cbOn) { const double hz = 55 + std::pow (std::min (1.0, std::max (0.0, S->combTune)), 1.8) * 650; cbDL = sr / hz; cbDR = sr / (hz * 1.015);
                 cbFb = std::min (1.0, std::max (0.0, S->combFb)) * 0.88; cbMix = std::min (1.0, std::max (0.0, S->combMix)); cbA = 1 - std::exp (-2 * 3.141592653589793 * 2400 / sr); }
+    const bool efOn = S && S->envOn;
+    if (efOn && ! efInit) { efInit = true; efE = 0; efN = 0; for (auto& z : efZ) z = 0; }
+    if (! efOn) efInit = false;
+    const double efAtt = 1 - std::exp (-1 / (0.005 * sr)), efRel = 1 - std::exp (-1 / (0.12 * sr));
+    double efGain = 0, efSpan = 0, efQ = 0.8;
+    if (efOn) { efGain = 1.2 + std::min (1.0, std::max (0.0, S->envSens)) * 5; efSpan = 400 + std::min (1.0, std::max (0.0, S->envRange)) * 2600; efQ = 0.8 + std::min (1.0, std::max (0.0, S->envRes)) * 3.2; }
+    auto lpCoef = [sr] (double* c, int o, double f, double q) { const double w0 = 2 * 3.141592653589793 * std::min (f, sr * 0.45) / sr, cs = std::cos (w0), al = std::sin (w0) / (2 * q), a0 = 1 + al;
+                                                                c[o] = (1 - cs) / 2 / a0; c[o + 1] = (1 - cs) / a0; c[o + 2] = (1 - cs) / 2 / a0; c[o + 3] = -2 * cs / a0; c[o + 4] = (1 - al) / a0; };
+    auto lpTick = [] (const double* c, int o, double* z, int zo, double x) { const double y = c[o] * x + z[zo]; z[zo] = c[o + 1] * x - c[o + 3] * y + z[zo + 1]; z[zo + 1] = c[o + 2] * x - c[o + 4] * y; return y; };
     const bool fgOn = S && S->fgOn;
     if (fgOn && ! fgInit) { fgInit = true; fgF = 1000; fgG = 1; fgN = 0; for (auto& z : fgZ) z = 0; }
     const double fgKf = 1 - std::exp (-1 / (0.008 * sr)), fgKg = 1 - std::exp (-1 / (0.006 * sr));
@@ -1053,6 +1062,12 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
             cbLp[0] += (yl - cbLp[0]) * cbA; cbLp[1] += (yr - cbLp[1]) * cbA;
             cbBuf[0][(size_t) cbW] = (float) (busL + cbLp[0] * cbFb); cbBuf[1][(size_t) cbW] = (float) (busR + cbLp[1] * cbFb); cbW = (cbW + 1) & 4095;
             busL = (float) (busL * (1 - cbMix * 0.4) + cbLp[0] * cbMix); busR = (float) (busR * (1 - cbMix * 0.4) + cbLp[1] * cbMix);
+        }
+        if (efOn)
+        {
+            const double lv = std::max (std::abs ((double) busL), std::abs ((double) busR)); efE += (lv - efE) * (lv > efE ? efAtt : efRel);
+            if ((efN++ & 15u) == 0) { const double f = 180 + std::min (1.0, efE * efGain) * efSpan; lpCoef (efC, 0, f, efQ); lpCoef (efC, 5, f * 1.15, 0.9); }
+            busL = (float) lpTick (efC, 5, efZ, 4, lpTick (efC, 0, efZ, 0, busL)); busR = (float) lpTick (efC, 5, efZ, 6, lpTick (efC, 0, efZ, 2, busR));
         }
         if (fgOn)
         {
