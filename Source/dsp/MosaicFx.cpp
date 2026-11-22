@@ -38,6 +38,9 @@ FxState FxState::fromJson (const json::Value& s)
     f.lofiOn = x["lofiOn"].truthy(); f.lofiGrit = numD (x["lofiGrit"], 0.35); f.lofiBits = numD (x["lofiBits"], 0.4); f.lofiLp = numD (x["lofiLp"], 0.45);
     f.ensOn = x["ensOn"].truthy(); f.ensRate = numD (x["ensRate"], 0.32); f.ensDepth = numD (x["ensDepth"], 0.55); f.ensMix = numD (x["ensMix"], 0.42);
     f.springOn = x["springOn"].truthy(); f.springBoing = numD (x["springBoing"], 0.55); f.springDecay = numD (x["springDecay"], 0.5); f.springMix = numD (x["springMix"], 0.32);
+    f.sirOn = x["sirOn"].truthy(); f.sirHold = x["sirHold"].truthy(); f.sirDub = numD (x["sirDub"], 0.55); f.sirGrit = numD (x["sirGrit"], 0.45); f.sirMix = numD (x["sirMix"], 0.45);
+    f.djOn = x["djOn"].truthy(); f.djKillLow = x["djKillLow"].truthy(); f.djKillMid = x["djKillMid"].truthy(); f.djKillHigh = x["djKillHigh"].truthy();
+    f.djHpf = numD (x["djHpf"], 0); f.djLpf = numD (x["djLpf"], 1); f.djCeil = numD (x["djCeil"], 0.79);
     f.dubOn = x["dubOn"].truthy(); f.dubThrow = x["dubThrow"].truthy(); f.dubDiv = numD (x["dubDiv"], 1); f.dubFb = numD (x["dubFb"], 0.58); f.dubMix = numD (x["dubMix"], 0.38);
     f.tapeOn = x["tapeOn"].truthy(); f.tapeSat = numD (x["tapeSat"], 0.3); f.tapeHead = numD (x["tapeHead"], 0.45); f.tapeWow = numD (x["tapeWow"], 0.15);
     f.master = s["master"].numOr (0); f.bpm = s["seq"].isObject() && s["seq"]["bpm"].truthy() ? s["seq"]["bpm"].numOr (120) : 120;
@@ -91,6 +94,11 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     spD.prepare (sr, 0.5, true); spLoop.reset(); spSendG.init (0); spWetG.init (0); spFbG.init (0); spQ.init (4.25);
     enD.prepare (sr, 0.05, false); bq (enLp, wa::BiquadType::lowpass); enPh1 = enPh2 = 0; enRateP.init (0.868); enDepthP.init (0); enDryG.init (1); enWetG.init (0);
     dubD.prepare (sr, 2, true); bq (dubHp, wa::BiquadType::highpass); bq (dubLp, wa::BiquadType::lowpass); dubLoop.reset();
+    bq (srBp, wa::BiquadType::bandpass); bq (srLp, wa::BiquadType::lowpass); srD.prepare (sr, 0.5, true); srKeyL = srKeyD = -1; srBpF.init (790); srFbG.init (0); srWetG.init (0);
+    srPh = srWob = 0; srF = 560; srG = 0; srRelT = 0; srHeld = srHoldNow = false;
+    for (auto* b : { &isoL1, &isoL2, &isoM3, &isoM4, &isoLp }) bq (*b, wa::BiquadType::lowpass);
+    for (auto* b : { &isoM1, &isoM2, &isoH1, &isoH2, &isoHp }) bq (*b, wa::BiquadType::highpass);
+    isoDry.init (1); isoBands.init (0); isoLoG.init (1); isoMidG.init (1); isoHiG.init (1); isoHpF.init (10); isoLpF.init (std::min (20000.0, sr * 0.45));
     dubSendG.init (0); dubWetG.init (0); dubFbG.init (0); dubTL.init (0.32); dubTR.init (0.42);
     { const double k = 1 + 0.45 * 5.5; dubCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) dubCurve[(size_t) i] = (float) (std::tanh (((double) i * 2 / 2047 - 1) * k) / k); }
     tpShaper.reset(); tpCurveK = -1; tpPh = 0; bq (tpHead, wa::BiquadType::lowpass); tpHeadF.init (10000); tpWowG.init (0); tpDryG.init (1); tpWetG.init (0); tpWowD.prepare (sr, 0.05, false);
@@ -226,6 +234,18 @@ void MosaicFx::applyBus (double beat)
       setTarget (dubTL, tl); setTarget (dubTR, std::min (1.9, tl * 1.333));
       const bool live = fx.dubOn || fx.dubThrow; setTarget (dubFbG, fx.dubThrow ? 0.94 : fx.dubOn ? clampd (fx.dubFb, 0, 1) * 0.86 : 0);
       setTarget (dubSendG, live ? 1 : 0); setTarget (dubWetG, live ? clampd (fx.dubMix, 0, 1) * 1.15 : 0); }
+    {   // DUB SIREN
+      const double sd = clampd (fx.sirDub, 0, 1), sg = clampd (fx.sirGrit, 0, 1), lv = std::max (4.0, std::round (64 - (0.25 + sg * 0.55) * 56)), dr = 1 + sg * 3.5; const bool live = fx.sirOn || fx.sirHold;
+      if (lv != srKeyL || std::abs (dr - srKeyD) > 1e-9) { srKeyL = lv; srKeyD = dr; srCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) srCurve[(size_t) i] = (float) (std::round (std::tanh (((double) i * 2 / 2047 - 1) * dr) / dr * lv) / lv); }
+      setTarget (srBpF, 340 + sd * 820); setTarget (srFbG, live ? 0.2 + sd * 0.58 : 0); setTarget (srWetG, live ? clampd (fx.sirMix, 0, 1) * 1.2 : 0);
+      srHoldNow = fx.sirHold; }
+    {   // DJ ISOLATOR
+      const bool dj = fx.djOn, kl = dj && fx.djKillLow, km = dj && fx.djKillMid, kh = dj && fx.djKillHigh, kill = kl || km || kh;
+      auto fast = [this] (wa::Param& p, double v) { p.setTarget (v, 0.008, sr); };
+      fast (isoDry, kill ? 0 : 1); fast (isoBands, kill ? 1 : 0); fast (isoLoG, kl ? 0 : 1); fast (isoMidG, km ? 0 : 1); fast (isoHiG, kh ? 0 : 1);
+      const double hp = clampd (fx.djHpf, 0, 1), lp = clampd (fx.djLpf, 0, 1), top = std::min (20000.0, sr * 0.45);
+      setTarget (isoHpF, dj && hp > 0.02 ? 20 + std::pow (hp, 2.2) * 1800 : 10); setTarget (isoLpF, dj && lp < 0.98 ? std::min (top, 280 + lp * lp * 15720) : top);
+      setTarget (limiter.threshold, dj ? -6 + clampd (fx.djCeil, 0, 1) * 5.7 : -1.5); }
     setTarget (rvHpF, std::max (20.0, fx.rvHp)); setTarget (rvLpF, std::max (500.0, fx.rvLp));
 }
 
@@ -479,6 +499,22 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             const float wl = enLp.tick (0, enD.read (0, 0.008 + d * l1)), wr = enLp.tick (1, enD.read (1, 0.011 - d * l2)); enD.advance();
             o[0] = o[0] * ed + wl * ew; o[1] = o[1] * ed + wr * ew;
         }
+        {   // DUB SIREN
+            const float bw = (float) srWetG.next(), fb = (float) srFbG.next(); srBp.coeffs (srBpF.next(), 1.8); srLp.coeffs (2600, 1);
+            if (srHoldNow != srHeld) { srHeld = srHoldNow; if (srHeld) srF = 560; else srRelT = 0.2; }
+            const double kF = 1 - std::exp (-1 / (0.35 * sr)), kUp = 1 - std::exp (-1 / (0.015 * sr)), kDn = 1 - std::exp (-1 / (0.04 * sr)), kBack = 1 - std::exp (-1 / (0.02 * sr));
+            if (srHeld) { srF += (190 - srF) * kF; srG += (0.28 - srG) * kUp; }
+            else { srG += (0 - srG) * kDn; if (srRelT > 0) srRelT -= 1 / sr; else srF += (560 - srF) * kBack; }
+            float siren = 0;
+            if (srG > 1e-6) { const double wob = 2 * srWob - 1, f = std::max (1.0, srF + 140 * wob); srPh += f / sr; srPh -= std::floor (srPh);
+                siren = (float) (srG * (srPh < 0.5 ? 4 * srPh - 1 : 3 - 4 * srPh)); }
+            srWob += 5.5 / sr; srWob -= std::floor (srWob);
+            if (bw > 0 || srG > 1e-6)
+                for (int c = 0; c < 2; ++c) { const float slap = srD.read (c, 0.145), lo = srLp.tick (c, wa::shapeCurve (srCurve, srBp.tick (c, o[c])) + slap * fb);
+                    srD.write (c, lo + siren); o[c] += (lo + slap + siren) * bw; }
+            else for (int c = 0; c < 2; ++c) srD.write (c, 0.f);
+            srD.advance();
+        }
         {   // ANALOG TAPE
             const float td = (float) tpDryG.next(), tw = (float) tpWetG.next(); const double wow = tpWowG.next();
             tpHead.coeffs (tpHeadF.next(), -3.0103);
@@ -494,6 +530,15 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstTame.tick (c, mstWarm.tick (c, mstShelf.tick (c, mstHp.tick (c, o[c]))));
             const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f)) * (float) mstWidthG.next();
             if (mw > 0) { o[0] = o[0] * md + (mid + side) * mw; o[1] = o[1] * md + (mid - side) * mw; }
+        }
+        {   // DJ ISOLATOR
+            const float idr = (float) isoDry.next(), ib = (float) isoBands.next(), gl = (float) isoLoG.next(), gm = (float) isoMidG.next(), gh = (float) isoHiG.next();
+            for (auto* b : { &isoL1, &isoL2, &isoM1, &isoM2 }) b->coeffs (180, -3.0103);
+            for (auto* b : { &isoM3, &isoM4, &isoH1, &isoH2 }) b->coeffs (2800, -3.0103);
+            isoHp.coeffs (isoHpF.next(), 2.92); isoLp.coeffs (isoLpF.next(), 0.83);
+            for (int c = 0; c < 2; ++c) { const float x = o[c];
+                const float lo = isoL2.tick (c, isoL1.tick (c, x)), mid = isoM4.tick (c, isoM3.tick (c, isoM2.tick (c, isoM1.tick (c, x)))), hi = isoH2.tick (c, isoH1.tick (c, x));
+                o[c] = isoLp.tick (c, isoHp.tick (c, x * idr + (lo * gl + mid * gm + hi * gh) * ib)); }
         }
         limiter.tick (o[0], o[1]);
         const float m = (float) master.next();

@@ -32,6 +32,8 @@ struct FxState
     bool ensOn = false; double ensRate = 0.32, ensDepth = 0.55, ensMix = 0.42;  // ENSEMBLE
     bool springOn = false; double springBoing = 0.55, springDecay = 0.5, springMix = 0.32;  // SPRING TANK
     bool dubOn = false, dubThrow = false; double dubDiv = 1, dubFb = 0.58, dubMix = 0.38;   // DUB SPACE ECHO   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
+    bool sirOn = false, sirHold = false; double sirDub = 0.55, sirGrit = 0.45, sirMix = 0.45;    // DUB SIREN
+    bool djOn = false, djKillLow = false, djKillMid = false, djKillHigh = false; double djHpf = 0, djLpf = 1, djCeil = 0.79;  // DJ ISOLATOR
     double master = 0.8, bpm = 120;
     static FxState fromJson (const json::Value& fullState);   // reads state.fx, state.master, state.seq.bpm as applyFx does
 };
@@ -98,6 +100,11 @@ private:
     wa::Delay enD; wa::Biquad enLp; double enPh1 = 0, enPh2 = 0; wa::Param enRateP, enDepthP, enDryG, enWetG;   // ENSEMBLE
     wa::Delay dubD; wa::Biquad dubHp, dubLp; std::vector<float> dubCurve; wa::Lag128 dubLoop; wa::Param dubSendG, dubWetG, dubFbG, dubTL, dubTR;
     wa::Shaper2x tpShaper; std::vector<float> tpCurve; double tpCurveK = -1, tpPh = 0; wa::Biquad tpHead; wa::Param tpHeadF, tpWowG, tpDryG, tpWetG; wa::Delay tpWowD;
+    // DUB SIREN: band-pass -> bit grit -> 2.6 kHz low-pass with a 145 ms slapback fed back into it, plus a held triangle siren (560 -> 190 Hz, 5.5 Hz saw wobble)
+    wa::Biquad srBp, srLp; wa::Delay srD; std::vector<float> srCurve; double srKeyL = -1, srKeyD = -1; wa::Param srBpF, srFbG, srWetG;
+    double srPh = 0, srWob = 0, srF = 560, srG = 0, srRelT = 0; bool srHeld = false, srHoldNow = false;
+    // DJ ISOLATOR (after PSY MASTER, before the limiter): crossfade onto a 3-band LR4 split when a band is killed, then DJ HPF / LPF
+    wa::Biquad isoL1, isoL2, isoM1, isoM2, isoM3, isoM4, isoH1, isoH2, isoHp, isoLp; wa::Param isoDry, isoBands, isoLoG, isoMidG, isoHiG, isoHpF, isoLpF;
     long long frame = 0;
     void setTarget (wa::Param& p, double v) { p.setTarget (v, 0.03, sr); }
     void applyBus (double beat);
