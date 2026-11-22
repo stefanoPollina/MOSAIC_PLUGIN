@@ -25,7 +25,7 @@ struct FxState
     bool crushOn = false; double crushBits = 8, crushMix = 0.5; bool tremOn = false; std::string tremMode = "trem", tremSync = "1/8"; double tremDepth = 0.5;
     bool widthOn = false; double width = 1.3; bool rvToneOn = false; double rvHp = 180, rvLp = 9000;
     bool compOn = false; double compThreshold = -18, compRatio = 3, compAttack = 0.01, compRelease = 0.2;
-    bool mstOn = false; double mstMono = 140, mstLowCut = 30, mstAir = 2.8;   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
+    bool mstOn = false; double mstMono = 140, mstLowCut = 30, mstAir = 2.8, mstWarm = 0;   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
     double master = 0.8, bpm = 120;
     static FxState fromJson (const json::Value& fullState);   // reads state.fx, state.master, state.seq.bpm as applyFx does
 };
@@ -78,7 +78,7 @@ private:
     // dynamics + output
     wa::Compressor comp, limiter; std::vector<float> safetyCurve; wa::Param master;
     // PSY MASTER (between compressor and limiter): low cut -> air shelf -> mid/side with the side high-passed below the mono frequency
-    wa::Biquad mstHp, mstShelf, mstSide1, mstSide2; wa::Param mstDry, mstWet, mstHpF, mstMonoF, mstAirDb;
+    wa::Biquad mstHp, mstShelf, mstWarm, mstSide1, mstSide2; wa::Param mstDry, mstWet, mstHpF, mstMonoF, mstAirDb, mstWarmF;
     long long frame = 0;
     void setTarget (wa::Param& p, double v) { p.setTarget (v, 0.03, sr); }
     void applyBus (double beat);
