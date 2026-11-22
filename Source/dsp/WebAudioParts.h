@@ -46,7 +46,7 @@ struct Param
     }
 };
 
-enum class BiquadType { lowpass, highpass, bandpass, allpass, notch };
+enum class BiquadType { lowpass, highpass, bandpass, allpass, notch, highshelf };   // highshelf: the Q argument carries the gain in dB, as WebAudio's gain
 struct Biquad
 {
     BiquadType type = BiquadType::lowpass;
@@ -78,6 +78,12 @@ struct Biquad
             case BiquadType::allpass:
                 if (f > 0 && f < 1) { if (Q > 0) { const double w = PI * f, al = std::sin (w) / (2 * Q), k = std::cos (w); set (1 - al, -2 * k, 1 + al, 1 + al, -2 * k, 1 - al); } else set (-1, 0, 0, 1, 0, 0); }
                 else set (1, 0, 0, 1, 0, 0);
+                break;
+            case BiquadType::highshelf:   // WebAudio highshelf (S = 1)
+                if (f >= 1) set (1, 0, 0, 1, 0, 0);
+                else if (f <= 0) { const double A2 = std::pow (10.0, Q / 20); set (A2, 0, 0, 1, 0, 0); }
+                else { const double A = std::pow (10.0, Q / 40), w = PI * f, al = std::sin (w) / 2 * std::sqrt (2.0), k = std::cos (w), sa = 2 * std::sqrt (A) * al;
+                       set (A * ((A + 1) + (A - 1) * k + sa), -2 * A * ((A - 1) + (A + 1) * k), A * ((A + 1) + (A - 1) * k - sa), (A + 1) - (A - 1) * k + sa, 2 * ((A - 1) - (A + 1) * k), (A + 1) - (A - 1) * k - sa); }
                 break;
             case BiquadType::notch:
                 if (f > 0 && f < 1) { if (Q > 0) { const double w = PI * f, al = std::sin (w) / (2 * Q), k = std::cos (w); set (1, -2 * k, 1, 1 + al, -2 * k, 1 - al); } else set (0, 0, 0, 1, 0, 0); }

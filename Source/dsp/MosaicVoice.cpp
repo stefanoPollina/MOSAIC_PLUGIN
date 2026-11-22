@@ -379,6 +379,11 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
     }
     const std::shared_ptr<const State> stHold = state; const State* S = stHold.get();
     int ei = 0;
+    // tempo-synced 1/4-note sidechain pump, as the page's worklet (off at 0)
+    const double duck = (S && S->duck == S->duck && S->duck > 0.001) ? std::min (1.0, S->duck) : 0.0;
+    const double beatDur = 60.0 / ((S && S->bpm == S->bpm && S->bpm > 0) ? S->bpm : 120.0);
+    const double duckRel = (S && S->duckRel == S->duckRel && S->duckRel > 0) ? std::min (0.96, std::max (0.12, S->duckRel)) : 0.55;
+    const double duckExp = 0.25 + std::min (1.0, std::max (0.0, (S && S->duckShape == S->duckShape) ? S->duckShape : 0.35)) * 1.75;
     for (int i = 0; i < frames; ++i)
     {
         const double t = now + i / sr;
@@ -1020,6 +1025,12 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
             }
         }
 
+        if (duck > 0)
+        {
+            const double bp = std::fmod (std::fmod (t - l8anchor, beatDur) + beatDur, beatDur) / beatDur;
+            const double g = 1 - duck * (1 - (bp < 0.03 ? 1 - bp / 0.03 : std::pow (std::min (1.0, (bp - 0.03) / duckRel), duckExp)));
+            busL *= g; busR *= g;
+        }
         busL *= 0.72; busR *= 0.72;
         const double dcL = busL - dcInL + 0.995 * dcOutL; dcInL = busL; dcOutL = dcL;
         const double dcR = busR - dcInR + 0.995 * dcOutR; dcInR = busR; dcOutR = dcR;

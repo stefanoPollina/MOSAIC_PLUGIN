@@ -119,7 +119,7 @@ int xDest (const std::string& n)
 State stateFromJson (const json::Value& v)
 {
     State S; S.present = v.isObject(); if (! S.present) return S;
-    S.bendRange = num (v["bendRange"]); S.detune = num (v["detune"]); S.unison = num (v["unison"]); S.bpm = num (v["bpm"]);
+    S.bendRange = num (v["bendRange"]); S.detune = num (v["detune"]); S.unison = num (v["unison"]); S.bpm = num (v["bpm"]); S.duck = num (v["duck"]); S.duckRel = num (v["duckRel"]); S.duckShape = num (v["duckShape"]);
     S.hasLfo = v["lfo"].isArray(); for (size_t i = 0; i < 8; ++i) lfo (S.lfo[i], v["lfo"][i]);
     S.hasLfoB = v["lfoB"].truthy() && v["lfoB"].isArray(); if (S.hasLfoB) for (size_t i = 0; i < 8; ++i) lfo (S.lfoB[i], v["lfoB"][i]);
     S.hasMod = v["mod"].isArray();

@@ -33,6 +33,7 @@ FxState FxState::fromJson (const json::Value& s)
     f.widthOn = x["widthOn"].truthy(); f.width = numD (x["width"], 1.3);
     f.rvToneOn = x["rvToneOn"].truthy(); f.rvHp = numD (x["rvHp"], 180); f.rvLp = numD (x["rvLp"], 9000);
     f.compOn = x["compOn"].truthy(); f.compThreshold = x["compThreshold"].numOr (0); f.compRatio = x["compRatio"].numOr (1); f.compAttack = x["compAttack"].numOr (0.001); f.compRelease = x["compRelease"].numOr (0.02);
+    f.mstOn = x["mstOn"].truthy(); f.mstMono = numD (x["mstMono"], 140); f.mstLowCut = numD (x["mstLowCut"], 30); f.mstAir = numD (x["mstAir"], 2.8);
     f.master = s["master"].numOr (0); f.bpm = s["seq"].isObject() && s["seq"]["bpm"].truthy() ? s["seq"]["bpm"].numOr (120) : 120;
     return f;
 }
@@ -75,6 +76,8 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     crushCurve.clear(); crushBits = 0; crushWet.init (0); crushDry.init (1);
     chRate.init (0.35); chDepthL.init (1); chDepthR.init (1); chWet.init (0); bq (chHp, wa::BiquadType::highpass); chHpF.init (250); chDelay.prepare (sr, 0.05, false); chPh = 0;
     tremRate.init (4); tremAmt.init (0); tremGain.init (1); panAmt.init (0); tremPh = 0; wSideL.init (0.5); wSideR.init (-0.5);
+    mstDry.init (1); mstWet.init (0); bq (mstHp, wa::BiquadType::highpass); mstHpF.init (30); bq (mstShelf, wa::BiquadType::highshelf); mstAirDb.init (2.8);
+    bq (mstSide1, wa::BiquadType::highpass); bq (mstSide2, wa::BiquadType::highpass); mstMonoF.init (140);
     ppIn.init (0); bq (ppHp, wa::BiquadType::highpass); ppHpF.init (300); bq (ppLp, wa::BiquadType::lowpass); ppLpF.init (3500);
     ppL.prepare (sr, 2, true); ppR.prepare (sr, 2, true); ppL.monoFirstQuantum = ppR.monoFirstQuantum = true; ppLoop.reset(); ppTime.init (0); ppFb.init (0.35); ppWet.init (0);
     bq (rvHp, wa::BiquadType::highpass); rvHpF.init (180); bq (rvLp, wa::BiquadType::lowpass); rvLpF.init (9000);
@@ -187,6 +190,8 @@ void MosaicFx::applyBus (double beat)
     setTarget (ppTime, std::min (1.9, std::max (0.01, ppT)));
     setTarget (ppFb, ppOn ? std::min (0.85, std::max (0.0, fx.ppFb)) : 0);
     setTarget (ppLpF, std::max (200.0, fx.ppLp)); setTarget (ppHpF, std::max (20.0, fx.ppHp));
+    setTarget (mstDry, fx.mstOn ? 0 : 1); setTarget (mstWet, fx.mstOn ? 1 : 0);
+    setTarget (mstHpF, clampd (fx.mstLowCut, 20, 65)); setTarget (mstMonoF, clampd (fx.mstMono, 60, 260)); setTarget (mstAirDb, clampd (fx.mstAir, 0, 8));
     setTarget (rvHpF, std::max (20.0, fx.rvHp)); setTarget (rvLpF, std::max (500.0, fx.rvLp));
 }
 
@@ -390,7 +395,16 @@ void MosaicFx::process (float* L, float* R, int n, double now)
         bw[0] += (lOut[0] + lOut[1]) * 0.5f * pwet; bw[1] += (rOut[0] + rOut[1]) * 0.5f * pwet;
         const float bd = (float) busDry.next(), bwg = (float) busWet.next();
         float o[2] = { sum[0] * bd + bw[0] * bwg, sum[1] * bd + bw[1] * bwg };
-        comp.tick (o[0], o[1]); limiter.tick (o[0], o[1]);
+        comp.tick (o[0], o[1]);
+        {
+            const float md = (float) mstDry.next(), mw = (float) mstWet.next();
+            const double hpF = mstHpF.next(), monoF = mstMonoF.next(), airDb = mstAirDb.next();
+            mstHp.coeffs (hpF, -3.0103); mstShelf.coeffs (8500, airDb); mstSide1.coeffs (monoF, -3.0103); mstSide2.coeffs (monoF, -3.0103);
+            float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstShelf.tick (c, mstHp.tick (c, o[c]));
+            const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f));
+            if (mw > 0) { o[0] = o[0] * md + (mid + side) * mw; o[1] = o[1] * md + (mid - side) * mw; }
+        }
+        limiter.tick (o[0], o[1]);
         const float m = (float) master.next();
         for (int c = 0; c < 2; ++c) o[c] = wa::shapeCurve (safetyCurve, o[c] * 0.5f) * 2 * m;
         L[i] = o[0]; R[i] = o[1];
