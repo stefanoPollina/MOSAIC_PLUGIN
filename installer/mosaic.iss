@@ -21,10 +21,18 @@ PrivilegesRequired=admin
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+CloseApplications=yes
+RestartApplications=no
+
+; An update must replace the plugin, never keep an older one: the old bundle is removed first, apps holding it are asked
+; to close, and a file Windows still has locked is swapped in at the next restart instead of being skipped.
+[InstallDelete]
+Type: filesandordirs; Name: "{commoncf64}\VST3\Mosaic.vst3"
+Type: files; Name: "{app}\Mosaic.exe"
 
 [Files]
-Source: "{#Built}\VST3\Mosaic.vst3\*"; DestDir: "{commoncf64}\VST3\Mosaic.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#Built}\Standalone\Mosaic.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Built}\VST3\Mosaic.vst3\*"; DestDir: "{commoncf64}\VST3\Mosaic.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace uninsrestartdelete
+Source: "{#Built}\Standalone\Mosaic.exe"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
 
 [Icons]
 Name: "{group}\Mosaic (standalone)"; Filename: "{app}\Mosaic.exe"
