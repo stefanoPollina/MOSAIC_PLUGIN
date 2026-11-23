@@ -55,7 +55,10 @@ BrowserHost::BrowserHost (MosaicProcessor& p) : proc (p)
             });
         });
     web = std::make_unique<juce::WebBrowserComponent> (options);
-    web->goToURL (juce::WebBrowserComponent::getResourceProviderRoot());
+    // a new address for every build: WebView2 keeps its data folder (the user bank lives there) and could otherwise
+    // serve a cached page from an earlier install. resource() ignores the query, and the user's storage is untouched.
+    web->goToURL (juce::WebBrowserComponent::getResourceProviderRoot() + "?build=" + juce::String ((juce::int64) BinaryData::index_htmlSize)
+                  + "-" + juce::String (__DATE__ " " __TIME__).removeCharacters (" :"));
     startTimerHz (60);
 }
 
