@@ -40,7 +40,7 @@ struct FxState
     bool tcOn = false; double tcSub = 0.45, tcTube = 0.35, tcSilk = 0.35;             // TUBE CONSOLE
     bool nyOn = false; double nySmash = 0.65, nyBody = 0.45, nyMix = 0.3;             // NY PARALLEL GLUE
     bool tlOn = false, tlMono = false; double tlAngle = 0.38, tlFocus = 0.4, tlTrim = 0.5;   // MASTER TILT & MONO
-    bool sirOn = false, sirHold = false; double sirDub = 0.55, sirGrit = 0.45, sirMix = 0.45;    // DUB SIREN
+    bool sirOn = false, sirHold = false; double sirDub = 0.55, sirGrit = 0.45, sirMix = 0.45, sirType = 0;    // DUB SIREN
     bool djOn = false, djKillLow = false, djKillMid = false, djKillHigh = false; double djHpf = 0, djLpf = 1, djCeil = 0.79;  // DJ ISOLATOR
     double master = 0.8, bpm = 120;
     static FxState fromJson (const json::Value& fullState);   // reads state.fx, state.master, state.seq.bpm as applyFx does
@@ -108,9 +108,10 @@ private:
     wa::Delay enD; wa::Biquad enLp; double enPh1 = 0, enPh2 = 0; wa::Param enRateP, enDepthP, enDryG, enWetG;   // ENSEMBLE
     wa::Delay dubD; wa::Biquad dubHp, dubLp; std::vector<float> dubCurve; wa::Lag128 dubLoop; wa::Param dubSendG, dubWetG, dubFbG, dubTL, dubTR;
     wa::Shaper2x tpShaper; std::vector<float> tpCurve; double tpCurveK = -1, tpPh = 0; wa::Biquad tpHead; wa::Param tpHeadF, tpWowG, tpDryG, tpWetG; wa::Delay tpWowD;
-    // DUB SIREN: band-pass -> bit grit -> 2.6 kHz low-pass with a 145 ms slapback fed back into it, plus a held triangle siren (560 -> 190 Hz, 5.5 Hz saw wobble)
+    // DUB SIREN: band-pass -> bit grit -> 2.6 kHz low-pass with a 145 ms slapback fed back into it, plus a held siren through a 2.2 kHz low-pass:
+    // a square tone, pitch cycled by WHOOP (rising 4 Hz saw sweeps), TRILL (8.5 Hz two-tone) or WAIL (3 Hz triangle up-and-down)
     wa::Biquad srBp, srLp; wa::Delay srD; std::vector<float> srCurve; double srKeyL = -1, srKeyD = -1; wa::Param srBpF, srFbG, srWetG;
-    double srPh = 0, srWob = 0, srF = 560, srG = 0, srRelT = 0; bool srHeld = false, srHoldNow = false;
+    double srPh = 0, srWob = 0, srF = 560, srG = 0, srRelT = 0; bool srHeld = false, srHoldNow = false; int srMode = 0, srHeldMode = 0; wa::Biquad srSirLp;
     // DJ ISOLATOR (after PSY MASTER, before the limiter): crossfade onto a 3-band LR4 split when a band is killed, then DJ HPF / LPF
     wa::Biquad isoL1, isoL2, isoM1, isoM2, isoM3, isoM4, isoH1, isoH2, isoHp, isoLp; wa::Param isoDry, isoBands, isoLoG, isoMidG, isoHiG, isoHpF, isoLpF;
     // MOTION after ENSEMBLE: rotary -> vowel morph -> auto-pan -> barberpole -> ring trem

@@ -46,7 +46,7 @@ FxState FxState::fromJson (const json::Value& s)
     f.tcOn = x["tcOn"].truthy(); f.tcSub = numD (x["tcSub"], 0.45); f.tcTube = numD (x["tcTube"], 0.35); f.tcSilk = numD (x["tcSilk"], 0.35);
     f.nyOn = x["nyOn"].truthy(); f.nySmash = numD (x["nySmash"], 0.65); f.nyBody = numD (x["nyBody"], 0.45); f.nyMix = numD (x["nyMix"], 0.3);
     f.tlOn = x["tlOn"].truthy(); f.tlMono = x["tlMono"].truthy(); f.tlAngle = numD (x["tlAngle"], 0.38); f.tlFocus = numD (x["tlFocus"], 0.4); f.tlTrim = numD (x["tlTrim"], 0.5);
-    f.sirOn = x["sirOn"].truthy(); f.sirHold = x["sirHold"].truthy(); f.sirDub = numD (x["sirDub"], 0.55); f.sirGrit = numD (x["sirGrit"], 0.45); f.sirMix = numD (x["sirMix"], 0.45);
+    f.sirOn = x["sirOn"].truthy(); f.sirHold = x["sirHold"].truthy(); f.sirDub = numD (x["sirDub"], 0.55); f.sirGrit = numD (x["sirGrit"], 0.45); f.sirMix = numD (x["sirMix"], 0.45); f.sirType = numD (x["sirType"], 0);
     f.djOn = x["djOn"].truthy(); f.djKillLow = x["djKillLow"].truthy(); f.djKillMid = x["djKillMid"].truthy(); f.djKillHigh = x["djKillHigh"].truthy();
     f.djHpf = numD (x["djHpf"], 0); f.djLpf = numD (x["djLpf"], 1); f.djCeil = numD (x["djCeil"], 0.79);
     f.dubOn = x["dubOn"].truthy(); f.dubThrow = x["dubThrow"].truthy(); f.dubDiv = numD (x["dubDiv"], 1); f.dubFb = numD (x["dubFb"], 0.58); f.dubMix = numD (x["dubMix"], 0.38);
@@ -114,7 +114,7 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     bq (tlLow, wa::BiquadType::lowshelf); bq (tlHigh, wa::BiquadType::highshelf); bq (tlFocus, wa::BiquadType::peaking);
     tlLowDb.init (0); tlHighDb.init (0); tlFocusDb.init (0); tlWetG.init (0); tlDryG.init (1); tlPassG.init (1); tlSumG.init (0); tlTrimG.init (1);
     bq (srBp, wa::BiquadType::bandpass); bq (srLp, wa::BiquadType::lowpass); srD.prepare (sr, 0.5, true); srKeyL = srKeyD = -1; srBpF.init (790); srFbG.init (0); srWetG.init (0);
-    srPh = srWob = 0; srF = 560; srG = 0; srRelT = 0; srHeld = srHoldNow = false;
+    srPh = srWob = 0; srF = 620; srG = 0; srRelT = 0; srHeld = srHoldNow = false; srMode = srHeldMode = 0; bq (srSirLp, wa::BiquadType::lowpass);
     for (auto* b : { &isoL1, &isoL2, &isoM3, &isoM4, &isoLp }) bq (*b, wa::BiquadType::lowpass);
     for (auto* b : { &isoM1, &isoM2, &isoH1, &isoH2, &isoHp }) bq (*b, wa::BiquadType::highpass);
     isoDry.init (1); isoBands.init (0); isoLoG.init (1); isoMidG.init (1); isoHiG.init (1); isoHpF.init (10); isoLpF.init (std::min (20000.0, sr * 0.45));
@@ -283,7 +283,7 @@ void MosaicFx::applyBus (double beat)
       const double sd = clampd (fx.sirDub, 0, 1), sg = clampd (fx.sirGrit, 0, 1), lv = std::max (4.0, std::round (64 - (0.25 + sg * 0.55) * 56)), dr = 1 + sg * 3.5; const bool live = fx.sirOn || fx.sirHold;
       if (lv != srKeyL || std::abs (dr - srKeyD) > 1e-9) { srKeyL = lv; srKeyD = dr; srCurve.assign (2048, 0.f); for (int i = 0; i < 2048; ++i) srCurve[(size_t) i] = (float) (std::round (std::tanh (((double) i * 2 / 2047 - 1) * dr) / dr * lv) / lv); }
       setTarget (srBpF, 340 + sd * 820); setTarget (srFbG, live ? 0.2 + sd * 0.58 : 0); setTarget (srWetG, live ? clampd (fx.sirMix, 0, 1) * 1.2 : 0);
-      srHoldNow = fx.sirHold; }
+      srHoldNow = fx.sirHold; srMode = std::min (2, (int) std::floor (clampd (fx.sirType, 0, 1) * 2.99)); }
     {   // DJ ISOLATOR
       const bool dj = fx.djOn, kl = dj && fx.djKillLow, km = dj && fx.djKillMid, kh = dj && fx.djKillHigh, kill = kl || km || kh;
       auto fast = [this] (wa::Param& p, double v) { p.setTarget (v, 0.008, sr); };
@@ -578,14 +578,26 @@ void MosaicFx::process (float* L, float* R, int n, double now)
         }
         {   // DUB SIREN
             const float bw = (float) srWetG.next(), fb = (float) srFbG.next(); srBp.coeffs (srBpF.next(), 1.8); srLp.coeffs (2600, 1);
-            if (srHoldNow != srHeld) { srHeld = srHoldNow; if (srHeld) srF = 560; else srRelT = 0.2; }
-            const double kF = 1 - std::exp (-1 / (0.35 * sr)), kUp = 1 - std::exp (-1 / (0.015 * sr)), kDn = 1 - std::exp (-1 / (0.04 * sr)), kBack = 1 - std::exp (-1 / (0.02 * sr));
-            if (srHeld) { srF += (190 - srF) * kF; srG += (0.28 - srG) * kUp; }
-            else { srG += (0 - srG) * kDn; if (srRelT > 0) srRelT -= 1 / sr; else srF += (560 - srF) * kBack; }
+            static const double BASE[3] = { 620, 700, 640 }, RATE[3] = { 4, 8.5, 3 }, DEPTH[3] = { 260, 150, 300 }, LVL[3] = { 0.2, 0.2, 0.2 };
+            const int m = srHeld ? srHeldMode : srMode;
+            if (srHoldNow != srHeld) { srHeld = srHoldNow; if (srHeld) { srHeldMode = srMode; srF = BASE[srMode] * 0.72; } }
+            auto k = [this] (double tau) { return 1 - std::exp (-1 / (tau * sr)); };
+            // a quick rise into the cycle on press; on release the pitch drops away as it fades into the echo
+            if (srHeld) { srF += (BASE[m] - srF) * k (0.04); srG += (LVL[m] - srG) * k (0.015); }
+            else { srF += (250 - srF) * k (0.12); srG += (0 - srG) * k (0.14); }
             float siren = 0;
-            if (srG > 1e-6) { const double wob = 2 * srWob - 1, f = std::max (1.0, srF + 140 * wob); srPh += f / sr; srPh -= std::floor (srPh);
-                siren = (float) (srG * (srPh < 0.5 ? 4 * srPh - 1 : 3 - 4 * srPh)); }
-            srWob += 5.5 / sr; srWob -= std::floor (srWob);
+            if (srG > 1e-6) {
+                // LFO shapes as WebAudio draws them: saw rises from 0, square starts high, triangle rises from 0
+                const double wob = m == 1 ? (srWob < 0.5 ? 1.0 : -1.0) : m == 2 ? (srWob < 0.25 ? 4 * srWob : srWob < 0.75 ? 2 - 4 * srWob : 4 * srWob - 4) : (srWob < 0.5 ? 2 * srWob : 2 * srWob - 2);
+                const double f = std::max (1.0, srF + DEPTH[m] * wob), dt = f / sr;
+                srPh += dt; srPh -= std::floor (srPh);
+                // band-limited square (PolyBLEP)
+                auto blep = [] (double t, double d) { if (t < d) { t /= d; return t + t - t * t - 1; } if (t > 1 - d) { t = (t - 1) / d; return t * t + t + t + 1; } return 0.0; };
+                double t2 = srPh + 0.5; t2 -= std::floor (t2);
+                const double v = (srPh < 0.5 ? 1.0 : -1.0) + blep (srPh, dt) - blep (t2, dt);
+                srSirLp.coeffs (2200, 1); siren = (float) (srG * srSirLp.tick (0, (float) v));
+            }
+            srWob += RATE[m] / sr; srWob -= std::floor (srWob);
             if (bw > 0 || srG > 1e-6)
                 for (int c = 0; c < 2; ++c) { const float slap = srD.read (c, 0.145), lo = srLp.tick (c, wa::shapeCurve (srCurve, srBp.tick (c, o[c])) + slap * fb);
                     srD.write (c, lo + siren); o[c] += (lo + slap + siren) * bw; }
