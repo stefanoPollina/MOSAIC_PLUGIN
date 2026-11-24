@@ -78,6 +78,7 @@ jobs:
           New-Item -ItemType Directory -Force distfx | Out-Null
           Copy-Item (Get-ChildItem installer\OutputFX\*.exe | Select-Object -First 1).FullName distfx\Mosaic-FX-Windows-Setup.exe
           Copy-Item -Recurse "build\MOSAIC_FX_artefacts\Release\VST3\Mosaic FX Suite.vst3" distfx\
+          Compress-Archive -Path "distfx\Mosaic FX Suite.vst3" -DestinationPath distfx\Mosaic-FX-Windows-Plugins.zip
           Get-ChildItem distfx
 
       - name: Upload Mosaic FX
@@ -96,5 +97,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MOSAIC VERSION ([0-9.]+)').Matches[0].Groups[1].Value
-          gh release upload "v$v.$env:GITHUB_RUN_NUMBER" distfx\Mosaic-FX-Windows-Setup.exe
+          gh release upload "v$v.$env:GITHUB_RUN_NUMBER" distfx\Mosaic-FX-Windows-Setup.exe distfx\Mosaic-FX-Windows-Plugins.zip
 
