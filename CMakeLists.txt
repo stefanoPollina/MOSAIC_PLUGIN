@@ -68,3 +68,35 @@ target_compile_definitions(MOSAIC PUBLIC
 target_link_libraries(MOSAIC
     PRIVATE MosaicUI juce::juce_audio_utils juce::juce_dsp juce::juce_gui_extra
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+
+# ---------------------------------------------------------------------------------------------------------------
+# Mosaic FX: Mosaic's FX bus as a stereo audio effect (VST3). A separate plugin with its own name, codes, bundle ID,
+# data folder and installer; it shares only the FX engine's source and the page with the synth, and never writes
+# anything the Mosaic synth uses.
+juce_add_plugin(MOSAIC_FX
+    PRODUCT_NAME "Mosaic FX"
+    COMPANY_NAME "Continuum"
+    BUNDLE_ID "com.continuum.mosaicfx"
+    PLUGIN_MANUFACTURER_CODE Cntm
+    PLUGIN_CODE MscF
+    FORMATS VST3
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS TRUE
+    NEEDS_WEB_BROWSER TRUE
+    NEEDS_WEBVIEW2 TRUE
+    VST3_CATEGORIES Fx)
+
+target_sources(MOSAIC_FX PRIVATE Source/fx/FxProcessor.cpp Source/fx/FxBrowserHost.cpp Source/dsp/MosaicFx.cpp)
+target_include_directories(MOSAIC_FX PRIVATE Source)
+target_compile_definitions(MOSAIC_FX PUBLIC
+    JUCE_WEB_BROWSER=1
+    JUCE_USE_WIN_WEBVIEW2_WITH_STATIC_LINKING=1
+    JUCE_USE_CURL=0
+    JUCE_VST3_CAN_REPLACE_VST2=0
+    JUCE_DISPLAY_SPLASH_SCREEN=0)
+target_link_libraries(MOSAIC_FX
+    PRIVATE MosaicUI juce::juce_audio_utils juce::juce_dsp juce::juce_gui_extra
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)

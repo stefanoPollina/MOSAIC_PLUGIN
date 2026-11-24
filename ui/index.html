@@ -12,6 +12,34 @@
   if (!J) return;                                   // an ordinary browser: Mosaic runs as it always has
   const MP = window.MosaicPlugin = { active: true };
 
+  /* ---------- Mosaic FX (the separate effect plugin): only the FX bus is shown and used ---------- */
+  let FXO = false, fresh = false;
+  try {
+    const init = window.__JUCE__.initialisationData || {};
+    FXO = !!(init.mosaicFxOnly && init.mosaicFxOnly[0]);
+    fresh = FXO && !(init.mosaicState && init.mosaicState[0] && init.mosaicState[0].length > 2) && !localStorage.getItem('continuum-mosaic-last-state-v2');
+  } catch (e) { /* not the FX plugin */ }
+  MP.fxOnly = FXO;
+  if (FXO) {
+    document.documentElement.classList.add('mosaic-fx-only');
+    const css = document.createElement('style');
+    css.textContent = 'html.mosaic-fx-only nav.tabs>button:not([data-page="fx"]),html.mosaic-fx-only #layerChip,html.mosaic-fx-only .layer-edit,' +
+      'html.mosaic-fx-only .presets,html.mosaic-fx-only .master-knob,html.mosaic-fx-only .voicebox,html.mosaic-fx-only footer.bed,html.mosaic-fx-only #mp-follow{display:none!important}' +
+      'html.mosaic-fx-only .plugin{grid-template-rows:58px 34px minmax(0,1fr)!important}';
+    (document.head || document.documentElement).appendChild(css);
+    const toFx = () => {
+      const tab = document.querySelector('nav.tabs>button[data-page="fx"]'), brand = document.querySelector('.brand em');
+      if (!tab) { setTimeout(toFx, 100); return; }
+      if (brand && brand.textContent.trim() === 'MOSAIC') brand.textContent = 'MOSAIC FX';
+      if (fresh) {   // a new Mosaic FX on a track: every effect off, so the audio passes clean until something is switched on
+        fresh = false;
+        try { const st = window.MosaicBank && window.MosaicBank.getState(); if (st && st.fx) { st.fx.reverbWet = 0; if (MP.engine) MP.engine.setState(st); } } catch (e) { console.error(e); }
+      }
+      if (!tab.classList.contains('on')) tab.click();
+    };
+    window.addEventListener('load', () => setTimeout(toFx, 120));
+  }
+
   /* ---------- the project's saved sound: Mosaic starts from it (it reads its last state at start-up) ---------- */
   try {
     const init = window.__JUCE__.initialisationData || {}, saved = init.mosaicState && init.mosaicState[0];
@@ -281,6 +309,7 @@
     const st = window.MosaicBank && window.MosaicBank.getState(), seq = window.__mosaicSequencer, e = MP.engine;
     if (!st || !e) return;
     if (t.hasTempo && t.bpm > 0 && Math.abs((st.seq.bpm || 120) - t.bpm) > 1e-6) { st.seq.bpm = t.bpm; e.setState(st); if (MP.onTempo) MP.onTempo(t.bpm); }
+    if (FXO) return;   // Mosaic FX: the tempo is all it takes from the DAW (no notes, no sequencer)
     if (!seq || !t.hasTransport) return;
     if (!follow) {
       if (t.playing) setLfoAnchor(t, 60 / (st.seq.bpm || 120), !hostPlaying);

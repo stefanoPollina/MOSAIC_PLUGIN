@@ -58,3 +58,43 @@ jobs:
           Compress-Archive -Path dist\Mosaic.exe, dist\Mosaic.vst3, docs\Mosaic-Manual.pdf -DestinationPath rel\Mosaic-Windows-Plugins.zip
           $notes = "Mosaic $ver for Windows.`n`n- **Mosaic-Windows-Setup.exe**: the installer (VST3 + standalone). Close your DAW first, then rescan plugins.`n- **Mosaic-Windows-Plugins.zip**: the same files to copy by hand (the VST3 goes in C:\Program Files\Common Files\VST3), plus **Mosaic-Manual.pdf**, the instruction manual.`n`nBuilt from $env:GITHUB_SHA."
           gh release create "v$ver" rel\Mosaic-Windows-Setup.exe rel\Mosaic-Windows-Plugins.zip --title "Mosaic $ver" --notes $notes --latest --target $env:GITHUB_SHA
+
+      # ---- Mosaic FX (the effect plugin). Runs after Mosaic's own release and may fail without affecting it:
+      # it builds its own target, installer (installer/OutputFX) and download, and never replaces a Mosaic file.
+      - name: Build Mosaic FX
+        id: fxbuild
+        continue-on-error: true
+        run: cmake --build build --config Release --target MOSAIC_FX_VST3 --parallel
+
+      - name: Build Mosaic FX installer
+        id: fxinst
+        if: steps.fxbuild.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MOSAIC VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$v.$env:GITHUB_RUN_NUMBER" installer\mosaic-fx.iss
+          New-Item -ItemType Directory -Force distfx | Out-Null
+          Copy-Item (Get-ChildItem installer\OutputFX\*.exe | Select-Object -First 1).FullName distfx\Mosaic-FX-Windows-Setup.exe
+          Copy-Item -Recurse "build\MOSAIC_FX_artefacts\Release\VST3\Mosaic FX.vst3" distfx\
+          Get-ChildItem distfx
+
+      - name: Upload Mosaic FX
+        if: steps.fxinst.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mosaic-FX-windows
+          path: distfx/
+
+      - name: Add Mosaic FX to the Release
+        if: github.ref == 'refs/heads/main' && steps.fxinst.outcome == 'success'
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MOSAIC VERSION ([0-9.]+)').Matches[0].Groups[1].Value
+          gh release upload "v$v.$env:GITHUB_RUN_NUMBER" distfx\Mosaic-FX-Windows-Setup.exe
+
