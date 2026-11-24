@@ -10,6 +10,7 @@
 #include <vector>
 #include "MiniJson.h"
 #include "WebAudioParts.h"
+#include "GranularCloud.h"
 #include <juce_dsp/juce_dsp.h>
 
 namespace mosaic
@@ -31,6 +32,7 @@ struct FxState
     bool lofiOn = false; double lofiGrit = 0.35, lofiBits = 0.4, lofiLp = 0.45;              // VINYL & LO-FI
     bool ensOn = false; double ensRate = 0.32, ensDepth = 0.55, ensMix = 0.42;  // ENSEMBLE
     bool springOn = false; double springBoing = 0.55, springDecay = 0.5, springMix = 0.32;  // SPRING TANK
+    bool gcOn = false, gcFreeze = false, gcRev = false; double gcMix = 0.35, gcRegen = 0.38, gcSize = 180, gcDens = 14, gcPitch = 2;   // GRANULAR CLOUD
     bool dubOn = false, dubThrow = false; double dubDiv = 1, dubFb = 0.58, dubMix = 0.38;   // DUB SPACE ECHO   // PSY MASTER: sub mono below mstMono Hz, low cut, air shelf dB
     bool rotOn = false; double rotSpeed = 0.35, rotDepth = 0.65, rotMix = 0.55;      // VINTAGE ROTARY
     bool vowOn = false; double vowPos = 0.35, vowRate = 0.28, vowRes = 0.55;          // VOWEL MORPH
@@ -105,6 +107,7 @@ private:
     // tape-saturated at unity gain, then fed to the other line (the cross hop runs a quantum late, as Chrome runs a cycle)
     std::vector<float> lfCurve; double lfLv = -1, lfDr = -1; wa::Biquad lfLp; wa::Param lfLpF, lfDryG, lfWetG;
     wa::Biquad spHp, spAp[3], spLp, spDamp; wa::Delay spD; wa::Lag128 spLoop; wa::Param spSendG, spWetG, spFbG, spQ;
+    GranularCloud gc;   // GRANULAR CLOUD (after SPRING TANK)
     wa::Delay enD; wa::Biquad enLp; double enPh1 = 0, enPh2 = 0; wa::Param enRateP, enDepthP, enDryG, enWetG;   // ENSEMBLE
     wa::Delay dubD; wa::Biquad dubHp, dubLp; std::vector<float> dubCurve; wa::Lag128 dubLoop; wa::Param dubSendG, dubWetG, dubFbG, dubTL, dubTR;
     wa::Shaper2x tpShaper; std::vector<float> tpCurve; double tpCurveK = -1, tpPh = 0; wa::Biquad tpHead; wa::Param tpHeadF, tpWowG, tpDryG, tpWetG; wa::Delay tpWowD;

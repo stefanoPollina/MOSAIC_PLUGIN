@@ -37,6 +37,8 @@ FxState FxState::fromJson (const json::Value& s)
     f.fsOn = x["fsOn"].truthy(); f.fsShift = numD (x["fsShift"], 4); f.fsFb = numD (x["fsFb"], 0.25); f.fsMix = numD (x["fsMix"], 0.35);
     f.lofiOn = x["lofiOn"].truthy(); f.lofiGrit = numD (x["lofiGrit"], 0.35); f.lofiBits = numD (x["lofiBits"], 0.4); f.lofiLp = numD (x["lofiLp"], 0.45);
     f.ensOn = x["ensOn"].truthy(); f.ensRate = numD (x["ensRate"], 0.32); f.ensDepth = numD (x["ensDepth"], 0.55); f.ensMix = numD (x["ensMix"], 0.42);
+    f.gcOn = x["gcOn"].truthy(); f.gcFreeze = x["gcFreeze"].truthy(); f.gcRev = x["gcRev"].truthy(); f.gcMix = numD (x["gcMix"], 0.35); f.gcRegen = numD (x["gcRegen"], 0.38);
+    f.gcSize = numD (x["gcSize"], 180); f.gcDens = numD (x["gcDens"], 14); f.gcPitch = numD (x["gcPitch"], 2);
     f.springOn = x["springOn"].truthy(); f.springBoing = numD (x["springBoing"], 0.55); f.springDecay = numD (x["springDecay"], 0.5); f.springMix = numD (x["springMix"], 0.32);
     f.rotOn = x["rotOn"].truthy(); f.rotSpeed = numD (x["rotSpeed"], 0.35); f.rotDepth = numD (x["rotDepth"], 0.65); f.rotMix = numD (x["rotMix"], 0.55);
     f.vowOn = x["vowOn"].truthy(); f.vowPos = numD (x["vowPos"], 0.35); f.vowRate = numD (x["vowRate"], 0.28); f.vowRes = numD (x["vowRes"], 0.55);
@@ -99,6 +101,7 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     hilDelay[0] = hilDelay[1] = 0; fsPh = 0; fsHz.init (0); fsDryG.init (1); fsWetG.init (0); fsFbG.init (0); fsFbDelay.prepare (sr, 0.2, true); bq (fsFbLp, wa::BiquadType::lowpass); fsLoop.reset();
     lfLv = lfDr = -1; bq (lfLp, wa::BiquadType::lowpass); lfLpF.init (5500); lfDryG.init (1); lfWetG.init (0);
     bq (spHp, wa::BiquadType::highpass); for (auto& a : spAp) bq (a, wa::BiquadType::allpass); bq (spLp, wa::BiquadType::lowpass); bq (spDamp, wa::BiquadType::lowpass);
+    gc.prepare (sr);
     spD.prepare (sr, 0.5, true); spLoop.reset(); spSendG.init (0); spWetG.init (0); spFbG.init (0); spQ.init (4.25);
     enD.prepare (sr, 0.05, false); bq (enLp, wa::BiquadType::lowpass); enPh1 = enPh2 = 0; enRateP.init (0.868); enDepthP.init (0); enDryG.init (1); enWetG.init (0);
     dubD.prepare (sr, 2, true); bq (dubHp, wa::BiquadType::highpass); bq (dubLp, wa::BiquadType::lowpass); dubLoop.reset();
@@ -297,6 +300,7 @@ void MosaicFx::applyBus (double beat)
 void MosaicFx::apply (const FxState& f, double now)
 {
     st = f; applied = true;
+    { GranularCloud::Params g; g.on = f.gcOn; g.freeze = f.gcFreeze; g.rev = f.gcRev; g.mix = f.gcMix; g.regen = f.gcRegen; g.size = f.gcSize; g.dens = f.gcDens; g.pitch = f.gcPitch; gc.set (g); }
     gateFx (now);
     const double drv = clampd (f.drive, 0, 1);
     if (driveAmount < 0) { driveCurve = makeCurve (drv); driveAmount = drv; }
@@ -536,6 +540,7 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             spD.advance(); spLoop.advance();
             for (int c = 0; c < 2; ++c) o[c] += y[c] * sw;
         }
+        gc.process (&o[0], &o[1], 1);   // GRANULAR CLOUD (untouched pass-through when off)
         {   // ENSEMBLE: sine on the left line, triangle at 1.47x on the right with opposite depth, both rolled off at 3.4 kHz
             const double r = enRateP.next(), d = enDepthP.next(); const float ed = (float) enDryG.next(), ew = (float) enWetG.next();
             const double l1 = std::sin (2 * wa::PI * enPh1), l2 = 2 / wa::PI * std::asin (std::sin (2 * wa::PI * enPh2));
