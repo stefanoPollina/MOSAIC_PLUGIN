@@ -74,7 +74,7 @@ target_link_libraries(MOSAIC
 # data folder and installer; it shares only the FX engine's source and the page with the synth, and never writes
 # anything the Mosaic synth uses.
 juce_add_plugin(MOSAIC_FX
-    PRODUCT_NAME "Mosaic FX"
+    PRODUCT_NAME "Mosaic FX Suite"
     COMPANY_NAME "Continuum"
     BUNDLE_ID "com.continuum.mosaicfx"
     PLUGIN_MANUFACTURER_CODE Cntm

@@ -1,6 +1,6 @@
 ; Mosaic FX installer (Inno Setup 6): the effect plugin only. Its own AppId, folder, output and uninstaller:
 ; installing, updating or uninstalling Mosaic FX never touches the Mosaic synth.
-#define AppName "Mosaic FX"
+#define AppName "Mosaic FX Suite"
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
@@ -28,10 +28,12 @@ RestartApplications=no
 
 ; only Mosaic FX's own bundle is ever replaced
 [InstallDelete]
+; also the bundle's old name, from before it became Mosaic FX Suite
 Type: filesandordirs; Name: "{commoncf64}\VST3\Mosaic FX.vst3"
+Type: filesandordirs; Name: "{commoncf64}\VST3\Mosaic FX Suite.vst3"
 
 [Files]
-Source: "{#Built}\VST3\Mosaic FX.vst3\*"; DestDir: "{commoncf64}\VST3\Mosaic FX.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace uninsrestartdelete
+Source: "{#Built}\VST3\Mosaic FX Suite.vst3\*"; DestDir: "{commoncf64}\VST3\Mosaic FX Suite.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace uninsrestartdelete
 
 [Icons]
-Name: "{group}\Uninstall Mosaic FX"; Filename: "{uninstallexe}"
+Name: "{group}\Uninstall Mosaic FX Suite"; Filename: "{uninstallexe}"

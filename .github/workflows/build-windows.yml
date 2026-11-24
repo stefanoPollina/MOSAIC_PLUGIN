@@ -77,7 +77,7 @@ jobs:
           & $iscc "/DAppVersion=$v.$env:GITHUB_RUN_NUMBER" installer\mosaic-fx.iss
           New-Item -ItemType Directory -Force distfx | Out-Null
           Copy-Item (Get-ChildItem installer\OutputFX\*.exe | Select-Object -First 1).FullName distfx\Mosaic-FX-Windows-Setup.exe
-          Copy-Item -Recurse "build\MOSAIC_FX_artefacts\Release\VST3\Mosaic FX.vst3" distfx\
+          Copy-Item -Recurse "build\MOSAIC_FX_artefacts\Release\VST3\Mosaic FX Suite.vst3" distfx\
           Get-ChildItem distfx
 
       - name: Upload Mosaic FX

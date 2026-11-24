@@ -26,7 +26,7 @@
     const toFx = () => {
       const tab = document.querySelector('nav.tabs>button[data-page="fx"]'), brand = document.querySelector('.brand em');
       if (!tab) { setTimeout(toFx, 100); return; }
-      if (brand && brand.textContent.trim() === 'MOSAIC') brand.textContent = 'MOSAIC FX';
+      if (brand && brand.textContent.trim() === 'MOSAIC') brand.textContent = 'MOSAIC FX SUITE';
       if (fresh) {   // a new Mosaic FX on a track: every effect off, so the audio passes clean until something is switched on
         fresh = false;
         try { const st = window.MosaicBank && window.MosaicBank.getState(); if (st && st.fx) { st.fx.reverbWet = 0; if (MP.engine) MP.engine.setState(st); } } catch (e) { console.error(e); }
