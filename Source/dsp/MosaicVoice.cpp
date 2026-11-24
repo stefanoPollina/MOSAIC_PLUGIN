@@ -41,6 +41,16 @@ inline double oscSample (OscWave type, double phase, double dt, double pwm)
     }
     return phase < 0.5 ? phase * 4 - 1 : 3 - phase * 4;
 }
+// CZ-style resonant phase distortion (mirrors resPd in the page's worklet): a cosine at 1 + 7 x depth times the pitch under a window
+// that falls to zero each cycle (res1 saw, res2 triangle, res3 trapezoid)
+inline double resPd (double phase, double depth, PdCurve curve, double dt)
+{
+    const double r = 1 + depth * 7;
+    const double w = curve == PdCurve::res1 ? 1 - phase : curve == PdCurve::res2 ? 1 - std::abs (2 * phase - 1) : std::min (1.0, (1 - phase) * 3);
+    double y = w * std::cos (TAU * r * phase);
+    if (curve != PdCurve::res2) y += 0.5 * blep (phase, dt);
+    return y;
+}
 inline double warpPhase (double phase, double depth, PdCurve curve)
 {
     if (depth < 0.001) return phase;
@@ -751,7 +761,8 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
                         const int idx = uniVoice ? u - 1 : oi;
                         if (sync > 0.001 && (oi == 0 ? voice.wrap2 : voice.wrap0)) store[idx] = 0;
                         const double phase = store[idx];
-                        const double read = oi == 0 && pdDepth > 0 ? warpPhase (phase, pdDepth, pdCurve) : phase;
+                        const bool resCurve = oi == 0 && pdDepth > 0 && (pdCurve == PdCurve::res1 || pdCurve == PdCurve::res2 || pdCurve == PdCurve::res3);
+                        const double read = oi == 0 && pdDepth > 0 && ! resCurve ? warpPhase (phase, pdDepth, pdCurve) : phase;
                         const double adt = inc < 0 ? -inc : inc;
                         if (wave == OscWave::noise || wave == OscWave::pink)
                         {
@@ -761,6 +772,7 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
                             const double tone = (wave == OscWave::pink ? voice.npk : voice.nw)[hi * 64 + (((int) (phase * 64)) & 63)];
                             sum += nv * (1 - hold) + tone * hold;
                         }
+                        else if (resCurve) sum += resPd (phase, pdDepth, pdCurve, adt < 1e-5 ? 1e-5 : adt);
                         else sum += oscSample (wave, read, adt < 1e-5 ? 1e-5 : adt, pwm);
                         store[idx] = wrap01 (phase + inc);
                         if (oi == 0 && u == 0) voice.wrap0 = phase + inc >= 1;

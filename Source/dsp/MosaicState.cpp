@@ -102,7 +102,7 @@ void layer (Layer& L, const json::Value& v)
     }
     L.character = num (v["character"]); L.fmRatio = num (v["fmRatio"]); L.fmIndex = num (v["fmIndex"]); L.pdDepth = num (v["pdDepth"]); L.level = num (v["level"]);
     { const std::string m = v["fmMode"].strOr ("off"); L.fmMode = m == "fm" ? FmMode::fm : m == "pd" ? FmMode::pd : m == "both" ? FmMode::both : FmMode::off; }
-    { const std::string c = v["pdCurve"].strOr ("bend"); L.pdCurve = c == "sine" ? PdCurve::sine : c == "pulse" ? PdCurve::pulse : PdCurve::bend; }
+    { const std::string c = v["pdCurve"].strOr ("bend"); L.pdCurve = c == "sine" ? PdCurve::sine : c == "pulse" ? PdCurve::pulse : c == "res1" ? PdCurve::res1 : c == "res2" ? PdCurve::res2 : c == "res3" ? PdCurve::res3 : PdCurve::bend; }
 }
 } // namespace
 

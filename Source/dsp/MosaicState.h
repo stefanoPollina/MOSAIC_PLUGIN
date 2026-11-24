@@ -20,7 +20,7 @@ enum class OscWave : int { missing = -1, sine, saw, square, noise, pink, other }
 enum class FiltType : int { missing = -1, lowpass, highpass, bandpass, notch, comb, formant, drip, other };
 enum class DripMode : int { both, even, rain, splash, stream, storm, threeD };
 enum class FmMode : int { off, fm, pd, both };
-enum class PdCurve : int { bend, sine, pulse };
+enum class PdCurve : int { bend, sine, pulse, res1, res2, res3 };
 enum class StepMode : int { wave, mul, step, rand, off };
 enum class StepLayer : int { any, A, B, AB };
 
