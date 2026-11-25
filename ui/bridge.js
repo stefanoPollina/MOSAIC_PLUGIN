@@ -16,6 +16,8 @@
     fresh = FXO && !(init.mosaicState && init.mosaicState[0] && init.mosaicState[0].length > 2) && !localStorage.getItem('continuum-mosaic-last-state-v2');
   } catch (e) { /* not the FX plugin */ }
   MP.fxOnly = FXO;
+  // the browser's AUDIO buffer menu does nothing in a plugin (the DAW sets the buffer): hide it
+  { const st = document.createElement('style'); st.textContent = '#audioBufWrap{display:none!important}'; (document.head || document.documentElement).appendChild(st); }
   if (FXO) {
     // MOSAIC LFOs are the FX Suite's own: the page rebuilds its settings from the controls it knows when it starts, so the bridge
     // keeps them (from the project, or from a state the DAW has just restored) and adds them to everything it sends and saves
