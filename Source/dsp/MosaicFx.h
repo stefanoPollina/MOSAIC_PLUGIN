@@ -11,7 +11,11 @@
 #include "MiniJson.h"
 #include "WebAudioParts.h"
 #include "GranularCloud.h"
+#ifdef MOSAIC_WASM
+#include "../wasm/juce_shim.h"   // the browser build: the reverb runs in the page's ConvolverNode
+#else
 #include <juce_dsp/juce_dsp.h>
+#endif
 
 namespace mosaic
 {
