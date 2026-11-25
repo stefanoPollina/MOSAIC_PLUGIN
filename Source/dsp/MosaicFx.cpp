@@ -133,6 +133,7 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     { const int n = 16385; const double a = 0.425, w = 0.075; safetyCurve.assign ((size_t) n, 0);
       for (int i = 0; i < n; ++i) { const double u = ((double) i / (n - 1)) * 2 - 1, m = std::abs (u); safetyCurve[(size_t) i] = (float) (m <= a ? u : (u < 0 ? -1 : 1) * (a + w * std::tanh ((m - a) / w))); } }
     master.init (1);
+    for (Nap* z : { &napDrive, &napPhaser, &napShimmer, &napAir, &napReverb, &napBus, &napFs, &napLofi, &napDub, &napSpring, &napEns, &napRot, &napVow, &napAp, &napBp, &napRt, &napTape, &napMst, &napTc, &napTl, &napIso }) *z = Nap();
 }
 
 juce::AudioBuffer<float> MosaicFx::makeImpulse (double sr, double seconds, const std::function<double()>& random)
@@ -377,7 +378,41 @@ void MosaicFx::process (float* L, float* R, int n, double now)
     }
     comp.quantumStart (n); limiter.quantumStart (n); nyComp.quantumStart (n);
 
+    // which switched-off effects rest for this quantum (decided once, at its start)
+    auto nap = [this, n] (Nap& z, bool off, double holdSeconds, auto&& wake)
+    {
+        if (testNoFxGating || ! off) { if (z.asleep) { z.asleep = false; wake(); } z.off = 0; return false; }
+        z.off += n; if (! z.asleep && (double) z.off >= holdSeconds * sr) z.asleep = true;
+        return z.asleep;
+    };
+    auto dw = [] (const wa::Param& dry, const wa::Param& wet) { return at (dry, 1) && at (wet, 0); };
+    const bool sDrive = nap (napDrive, dw (driveDry, driveWet), 0.1, [this] { drive.reset(); });
+    const bool sPhaser = nap (napPhaser, dw (phaserDry, phaserWet), 0.1, [this] { for (auto& s : stages) s.reset(); });
+    // the delay and the multi-band echoes always run (they are cheap, and switching them on then repeats what was just played)
+    constexpr bool sDelay = false, sMulti = false;
+    const bool sShimmer = nap (napShimmer, ! liveShimmer.on, 0.1, [this] { shimmerFilter.reset(); });
+    const bool sAir = nap (napAir, ! liveAir.on, 0.5, [this] { for (auto& t : airTap) t.clear(); airHp.reset(); airLp.reset(); });
+    const bool sReverb = nap (napReverb, at (reverbWet, 0) && sAir, reverbSeconds + 0.5, [this] { conv.reset(); rvHp.reset(); rvLp.reset(); });
+    const bool sBus = nap (napBus, dw (busDry, busWet), 6, [this] { djLp.reset(); djHp.reset(); chHp.reset(); chDelay.clear(); ppHp.reset(); ppLp.reset(); ppL.clear(); ppR.clear(); ppLoop.clear(); });
+    const bool sFs = nap (napFs, dw (fsDryG, fsWetG) && at (fsFbG, 0), 1, [this] { for (int k = 0; k < 4; ++k) { hilI[k] = HilSec { hilI[k].a2 }; hilQ[k] = HilSec { hilQ[k].a2 }; } hilDelay[0] = hilDelay[1] = 0; fsFbDelay.clear(); fsLoop.clear(); fsFbLp.reset(); });
+    const bool sLofi = nap (napLofi, dw (lfDryG, lfWetG), 0.1, [this] { lfLp.reset(); });
+    const bool sDub = nap (napDub, at (dubSendG, 0) && at (dubWetG, 0) && at (dubFbG, 0), 6, [this] { dubD.clear(); dubLoop.clear(); dubHp.reset(); dubLp.reset(); });
+    const bool sSpring = nap (napSpring, at (spSendG, 0) && at (spWetG, 0) && at (spFbG, 0), 4, [this] { spHp.reset(); for (auto& a : spAp) a.reset(); spLp.reset(); spDamp.reset(); spD.clear(); spLoop.clear(); });
+    const bool sEns = nap (napEns, dw (enDryG, enWetG), 0.1, [this] { enD.clear(); enLp.reset(); });
+    const bool sRot = nap (napRot, dw (rotDryG, rotWetG), 0.1, [this] { rotD.clear(); rotLp.reset(); });
+    const bool sVow = nap (napVow, dw (vowDryG, vowWetG), 0.2, [this] { vowF1.reset(); vowF2.reset(); vowBody.reset(); });
+    const bool sAp = nap (napAp, dw (apDryG, apWetG), 0.1, [this] { apLo1.reset(); apLo2.reset(); apHi1.reset(); apHi2.reset(); });
+    const bool sBp = nap (napBp, dw (bpDryG, bpWetG) && at (bpFbG, 0), 2, [this] { for (auto& a : bpAp) a.reset(); bpLp.reset(); bpLoop.clear(); });
+    const bool sRt = nap (napRt, dw (rtDryG, rtWetG), 0.1, [this] { rtPre.reset(); rtPost.reset(); });
+    const bool sTape = nap (napTape, dw (tpDryG, tpWetG), 0.1, [this] { tpShaper.reset(); tpHead.reset(); tpWowD.clear(); });
+    const bool sMst = nap (napMst, dw (mstDry, mstWet), 0.1, [this] { mstHp.reset(); mstShelf.reset(); mstWarm.reset(); mstTame.reset(); mstSide1.reset(); mstSide2.reset(); });
+    const bool sTc = nap (napTc, dw (tcDryG, tcWetG), 0.1, [this] { tcShelf.reset(); tcShaper.reset(); tcSilk.reset(); });
+    const bool sTl = nap (napTl, dw (tlDryG, tlWetG), 0.1, [this] { tlLow.reset(); tlHigh.reset(); tlFocus.reset(); });
+    const bool sIso = nap (napIso, dw (isoDry, isoBands), 0.1, [this] { for (auto* b : { &isoL1, &isoL2, &isoM1, &isoM2, &isoM3, &isoM4, &isoH1, &isoH2 }) b->reset(); });
+
     // AIR taps read the past (their delay is at least one quantum inside the reverb loop)
+    if (sAir) { std::fill (airSendBuf[0].begin(), airSendBuf[0].begin() + n, 0.f); std::fill (airSendBuf[1].begin(), airSendBuf[1].begin() + n, 0.f); }
+    else
     for (int i = 0; i < n; ++i)
     {
         const long long f = frame + i;
@@ -407,30 +442,40 @@ void MosaicFx::process (float* L, float* R, int n, double now)
         const float g = (float) gate.next();
         float x[2] = { L[i] * g, R[i] * g };
         // drive
-        const float dd = (float) driveDry.next(), dw = (float) driveWet.next();
-        float ds[2];
-        for (int c = 0; c < 2; ++c) { const float wet = drive.tick (c, x[c], driveCurve); ds[c] = x[c] * dd + wet * dw; }
+        const float dd = (float) driveDry.next(), dwt = (float) driveWet.next();
+        float ds[2] = { x[0], x[1] };
+        if (! sDrive) for (int c = 0; c < 2; ++c) { const float wet = drive.tick (c, x[c], driveCurve); ds[c] = x[c] * dd + wet * dwt; }
         drive.advance();
         // phaser
-        const double lfo = std::sin (2 * wa::PI * phasePh); phasePh += phaseRate.next() / sr; phasePh -= std::floor (phasePh);
-        const double depthOut = lfo * phaseDepth.next();
+        const double prate = phaseRate.next(), pdepth = phaseDepth.next();
+        const double lfo = sPhaser ? 0 : std::sin (2 * wa::PI * phasePh); phasePh += prate / sr; phasePh -= std::floor (phasePh);
+        const double depthOut = lfo * pdepth;
         const float pd = (float) phaserDry.next(), pw = (float) phaserWet.next();
-        float ps[2];
-        for (int s = 0; s < 4; ++s) stages[(size_t) s].coeffs (1600 + (float) (depthOut * (1 - s * 0.12)), 0.7);
-        for (int c = 0; c < 2; ++c) { float y = ds[c]; for (auto& s : stages) y = s.tick (c, y); ps[c] = ds[c] * pd + y * pw; }
+        float ps[2] = { ds[0], ds[1] };
+        if (! sPhaser)
+        {
+            for (int s = 0; s < 4; ++s) stages[(size_t) s].coeffs (1600 + (float) (depthOut * (1 - s * 0.12)), 0.7);
+            for (int c = 0; c < 2; ++c) { float y = ds[c]; for (auto& s : stages) y = s.tick (c, y); ps[c] = ds[c] * pd + y * pw; }
+        }
         // delay
         const double dT[2] = { tDelay.L[i], tDelay.R[i] }; const float dFb = (float) delayFb.next(), dWet = (float) delayWet.next(), dDry = (float) delayDry.next();
-        delayDamp.coeffs (4200, 1);
-        float pre[2];
-        for (int c = 0; c < 2; ++c) { delay.write (c, ps[c] + delayLoop.read (c)); const float rd = delay.read (c, dT[c]); const float dm = delayDamp.tick (c, rd); delayLoop.write (c, dFb * dm); pre[c] = ps[c] * dDry + dm * dWet; }
+        float pre[2] = { ps[0], ps[1] };
+        if (! sDelay)
+        {
+            delayDamp.coeffs (4200, 1);
+            for (int c = 0; c < 2; ++c) { delay.write (c, ps[c] + delayLoop.read (c)); const float rd = delay.read (c, dT[c]); const float dm = delayDamp.tick (c, rd); delayLoop.write (c, dFb * dm); pre[c] = ps[c] * dDry + dm * dWet; }
+        }
         delay.advance(); delayLoop.advance();
         // multi-band echoes
         const float mWet = (float) multiWet.next(); float macc[2] = { 0, 0 };
         for (auto& b : multi)
         {
             const DTimes& bt = tMulti[&b - &multi[0]]; const float bfb = (float) b.fb.next();
-            b.f.coeffs (b.f.type == wa::BiquadType::lowpass ? 380 : b.f.type == wa::BiquadType::bandpass ? 1400 : 3200, b.f.type == wa::BiquadType::bandpass ? 0.7 : 1);
-            for (int c = 0; c < 2; ++c) { const float in = b.f.tick (c, ps[c]); b.d.write (c, in + b.loop.read (c)); const float rd = b.d.read (c, c ? bt.R[i] : bt.L[i]); b.loop.write (c, rd * bfb); macc[c] += rd * 0.34f; }
+            if (! sMulti)
+            {
+                b.f.coeffs (b.f.type == wa::BiquadType::lowpass ? 380 : b.f.type == wa::BiquadType::bandpass ? 1400 : 3200, b.f.type == wa::BiquadType::bandpass ? 0.7 : 1);
+                for (int c = 0; c < 2; ++c) { const float in = b.f.tick (c, ps[c]); b.d.write (c, in + b.loop.read (c)); const float rd = b.d.read (c, c ? bt.R[i] : bt.L[i]); b.loop.write (c, rd * bfb); macc[c] += rd * 0.34f; }
+            }
             b.d.advance(); b.loop.advance();
         }
         if (liveMulti.on) for (int c = 0; c < 2; ++c) pre[c] += macc[c] * mWet;
@@ -438,148 +483,202 @@ void MosaicFx::process (float* L, float* R, int n, double now)
         double sh = 0;
         for (int k = 0; k < 3; ++k)
         {
-            const double p = shPh[(size_t) k]; sh += (k == 0 ? std::sin (2 * wa::PI * p) : tri (p)) * shGain[(size_t) k].next();
+            const double p = shPh[(size_t) k]; const double gk = shGain[(size_t) k].next();
+            if (! sShimmer) sh += (k == 0 ? std::sin (2 * wa::PI * p) : tri (p)) * gk;
             shPh[(size_t) k] = p + shFreq[(size_t) k].next() / sr; shPh[(size_t) k] -= std::floor (shPh[(size_t) k]);
         }
-        shimmerFilter.coeffs (2200, 1);
-        float shf = shimmerFilter.tick (0, (float) sh);
-        const double shL = std::sin (2 * wa::PI * shLfoPh); shLfoPh += shimmerLfoRate.next() / sr; shLfoPh -= std::floor (shLfoPh);
-        shf = (float) (shf * (1 + shL * shimmerDepth.next()));
-        if (liveShimmer.on) { pre[0] += shf; pre[1] += shf; }
+        const double shRate = shimmerLfoRate.next(), shDepth = shimmerDepth.next();
+        if (! sShimmer)
+        {
+            shimmerFilter.coeffs (2200, 1);
+            float shf = shimmerFilter.tick (0, (float) sh);
+            const double shL = std::sin (2 * wa::PI * shLfoPh);
+            shf = (float) (shf * (1 + shL * shDepth));
+            if (liveShimmer.on) { pre[0] += shf; pre[1] += shf; }
+        }
+        shLfoPh += shRate / sr; shLfoPh -= std::floor (shLfoPh);
         fxPreL[i] = pre[0]; fxPreR[i] = pre[1];
         // reverb input (through the reverb tone filters while they are on) + AIR send
-        float rin[2] = { pre[0], pre[1] };
-        rvHp.coeffs (rvHpF.next(), 1); rvLp.coeffs (rvLpF.next(), 1);
-        for (int c = 0; c < 2; ++c) { const float tone = rvLp.tick (c, rvHp.tick (c, pre[c])); if (st.rvToneOn) rin[c] = tone; }
-        const float aS = (float) airSend.next();
-        if (liveAir.on) { rin[0] += airSendBuf[0][(size_t) i] * aS; rin[1] += airSendBuf[1][(size_t) i] * aS; }
-        revBuf.setSample (0, i, rin[0]); revBuf.setSample (1, i, rin[1]);
+        const double rvH = rvHpF.next(), rvL = rvLpF.next(); const float aS = (float) airSend.next();
+        if (! sReverb)
+        {
+            float rin[2] = { pre[0], pre[1] };
+            rvHp.coeffs (rvH, 1); rvLp.coeffs (rvL, 1);
+            for (int c = 0; c < 2; ++c) { const float tone = rvLp.tick (c, rvHp.tick (c, pre[c])); if (st.rvToneOn) rin[c] = tone; }
+            if (liveAir.on) { rin[0] += airSendBuf[0][(size_t) i] * aS; rin[1] += airSendBuf[1][(size_t) i] * aS; }
+            revBuf.setSample (0, i, rin[0]); revBuf.setSample (1, i, rin[1]);
+        }
     }
-    { juce::dsp::AudioBlock<float> blk (revBuf.getArrayOfWritePointers(), 2, (size_t) n); conv.process (juce::dsp::ProcessContextReplacing<float> (blk)); }
+    if (sReverb) revBuf.clear();
+    else { juce::dsp::AudioBlock<float> blk (revBuf.getArrayOfWritePointers(), 2, (size_t) n); conv.process (juce::dsp::ProcessContextReplacing<float> (blk)); }
 
     for (int i = 0; i < n; ++i)
     {
         const float rv[2] = { revBuf.getSample (0, i), revBuf.getSample (1, i) };
         const float rw = (float) reverbWet.next(), aD = (float) airDirect.next();
         // AIR: the reverb tail through low/high cut into the swept taps (written now, read next quantum)
-        airHp.coeffs (140, 1); airLp.coeffs (5200, 1);
-        for (int c = 0; c < 2; ++c) { const float a = airLp.tick (c, airHp.tick (c, rv[c])); for (auto& tap : airTap) tap.write (c, a); }
+        if (! sAir)
+        {
+            airHp.coeffs (140, 1); airLp.coeffs (5200, 1);
+            for (int c = 0; c < 2; ++c) { const float a = airLp.tick (c, airHp.tick (c, rv[c])); for (auto& tap : airTap) tap.write (c, a); }
+        }
         for (auto& tap : airTap) tap.advance();
         float sum[2] = { fxPreL[i] + rv[0] * rw, fxPreR[i] + rv[1] * rw };
         if (liveAir.on) { sum[0] += airSendBuf[0][(size_t) i] * aD; sum[1] += airSendBuf[1][(size_t) i] * aD; }
         // FX BUS: DJ filter → crush → chorus → tremolo / auto-pan → width, ping-pong as a send
-        djLp.coeffs (djLpF.next(), djLpQ.next()); djHp.coeffs (djHpF.next(), djHpQ.next());
+        const double djLf = djLpF.next(), djLq = djLpQ.next(), djHf = djHpF.next(), djHq = djHpQ.next();
         const float cW = (float) crushWet.next(), cD = (float) crushDry.next();
-        float cs[2];
-        for (int c = 0; c < 2; ++c) { const float y = djHp.tick (c, djLp.tick (c, sum[c])); cs[c] = y * cD + (crushCurve.empty() ? y : wa::shapeCurve (crushCurve, y)) * cW; }
-        const double chL = std::sin (2 * wa::PI * chPh); chPh += chRate.next() / sr; chPh -= std::floor (chPh);
-        chHp.coeffs (chHpF.next(), 1);
+        const double chL = sBus ? 0 : std::sin (2 * wa::PI * chPh); chPh += chRate.next() / sr; chPh -= std::floor (chPh);
+        const double chHf = chHpF.next();
         const double dL = 0.012 + chL * chDepthL.next(), dR = 0.016 + chL * chDepthR.next(); const float chw = (float) chWet.next();
-        float chs[2];
-        { const float hl = chHp.tick (0, cs[0]), hr = chHp.tick (1, cs[1]); chDelay.write (0, hl); chDelay.write (1, frame == 0 ? 0.f : hr);   // Chrome: the right splitter output is silent for the first quantum
-          chs[0] = cs[0] + chDelay.read (0, dL) * chw; chs[1] = cs[1] + chDelay.read (1, dR) * chw; chDelay.advance(); }
-        const double tl = std::sin (2 * wa::PI * tremPh); tremPh += tremRate.next() / sr; tremPh -= std::floor (tremPh);
+        const double tl = sBus ? 0 : std::sin (2 * wa::PI * tremPh); tremPh += tremRate.next() / sr; tremPh -= std::floor (tremPh);
         const float tg = (float) (tremGain.next() + tl * tremAmt.next());
-        float tr[2] = { chs[0] * tg, chs[1] * tg };
-        wa::stereoPan (tr[0], tr[1], tl * panAmt.next());
-        const float mid = (tr[0] + tr[1]) * 0.5f, side = tr[0] * (float) wSideL.next() + tr[1] * (float) wSideR.next();
-        float bw[2] = { mid + side, mid - side };
-        // ping-pong
+        const double panA = panAmt.next(); const float wsl = (float) wSideL.next(), wsr = (float) wSideR.next();
         const float pin = (float) ppIn.next(), pfb = (float) ppFb.next(), pwet = (float) ppWet.next();
-        ppHp.coeffs (ppHpF.next(), 1); ppLp.coeffs (ppLpF.next(), 1);
-        float lOut[2], rOut[2];
-        for (int c = 0; c < 2; ++c) { const double pt = c ? tPp.R[i] : tPp.L[i]; lOut[c] = ppL.read (c, pt); rOut[c] = ppR.read (c, pt); }
-        for (int c = 0; c < 2; ++c)
+        const double ppHf = ppHpF.next(), ppLf = ppLpF.next();
+        float bw[2] = { 0, 0 };
+        if (! sBus)
         {
-            const float in = cs[c] * pin + rOut[c] * pfb; ppL.write (c, ppLp.tick (c, ppHp.tick (c, in)));
-            ppR.write (c, ppLoop.read (c)); ppLoop.write (c, lOut[c]);   // the quantum late hop in this loop is left → right
+            djLp.coeffs (djLf, djLq); djHp.coeffs (djHf, djHq);
+            float cs[2];
+            for (int c = 0; c < 2; ++c) { const float y = djHp.tick (c, djLp.tick (c, sum[c])); cs[c] = y * cD + (crushCurve.empty() ? y : wa::shapeCurve (crushCurve, y)) * cW; }
+            chHp.coeffs (chHf, 1);
+            float chs[2];
+            { const float hl = chHp.tick (0, cs[0]), hr = chHp.tick (1, cs[1]); chDelay.write (0, hl); chDelay.write (1, frame == 0 ? 0.f : hr);   // Chrome: the right splitter output is silent for the first quantum
+              chs[0] = cs[0] + chDelay.read (0, dL) * chw; chs[1] = cs[1] + chDelay.read (1, dR) * chw; }
+            float tr[2] = { chs[0] * tg, chs[1] * tg };
+            wa::stereoPan (tr[0], tr[1], tl * panA);
+            const float mid = (tr[0] + tr[1]) * 0.5f, side = tr[0] * wsl + tr[1] * wsr;
+            bw[0] = mid + side; bw[1] = mid - side;
+            // ping-pong
+            ppHp.coeffs (ppHf, 1); ppLp.coeffs (ppLf, 1);
+            float lOut[2], rOut[2];
+            for (int c = 0; c < 2; ++c) { const double pt = c ? tPp.R[i] : tPp.L[i]; lOut[c] = ppL.read (c, pt); rOut[c] = ppR.read (c, pt); }
+            for (int c = 0; c < 2; ++c)
+            {
+                const float in = cs[c] * pin + rOut[c] * pfb; ppL.write (c, ppLp.tick (c, ppHp.tick (c, in)));
+                ppR.write (c, ppLoop.read (c)); ppLoop.write (c, lOut[c]);   // the quantum late hop in this loop is left → right
+            }
+            bw[0] += (lOut[0] + lOut[1]) * 0.5f * pwet; bw[1] += (rOut[0] + rOut[1]) * 0.5f * pwet;
         }
-        ppL.advance(); ppR.advance(); ppLoop.advance();
-        bw[0] += (lOut[0] + lOut[1]) * 0.5f * pwet; bw[1] += (rOut[0] + rOut[1]) * 0.5f * pwet;
+        chDelay.advance(); ppL.advance(); ppR.advance(); ppLoop.advance();
         const float bd = (float) busDry.next(), bwg = (float) busWet.next();
-        float o[2] = { sum[0] * bd + bw[0] * bwg, sum[1] * bd + bw[1] * bwg };
+        float o[2] = { sum[0], sum[1] };
+        if (! sBus) { o[0] = sum[0] * bd + bw[0] * bwg; o[1] = sum[1] * bd + bw[1] * bwg; }
         comp.tick (o[0], o[1]);
         {   // PSY FREQ SHIFT
             const double hz = fsHz.next(); const float fd = (float) fsDryG.next(), fw = (float) fsWetG.next(), fg = (float) fsFbG.next();
-            const float cv = (float) std::cos (2 * wa::PI * fsPh), sv = (float) std::sin (2 * wa::PI * fsPh);
-            fsPh += hz / sr; fsPh -= std::floor (fsPh);
-            fsFbLp.coeffs (2200, 1);
-            float sh[2];
-            for (int c = 0; c < 2; ++c)
+            if (! sFs)
             {
-                const float in = o[c] + fsLoop.read (c) * fg;
-                float vi = hilDelay[c]; hilDelay[c] = in; float vq = in;
-                for (int k = 0; k < 4; ++k) { vi = hilI[k].tick (c, vi); vq = hilQ[k].tick (c, vq); }
-                sh[c] = vi * cv + vq * sv;
-                fsFbDelay.write (c, sh[c]);
+                const float cv = (float) std::cos (2 * wa::PI * fsPh), sv = (float) std::sin (2 * wa::PI * fsPh);
+                fsFbLp.coeffs (2200, 1);
+                float sh[2];
+                for (int c = 0; c < 2; ++c)
+                {
+                    const float in = o[c] + fsLoop.read (c) * fg;
+                    float vi = hilDelay[c]; hilDelay[c] = in; float vq = in;
+                    for (int k = 0; k < 4; ++k) { vi = hilI[k].tick (c, vi); vq = hilQ[k].tick (c, vq); }
+                    sh[c] = vi * cv + vq * sv;
+                    fsFbDelay.write (c, sh[c]);
+                }
+                for (int c = 0; c < 2; ++c) { fsLoop.write (c, fsFbLp.tick (c, fsFbDelay.read (c, 0.018))); o[c] = o[c] * fd + sh[c] * fw; }
             }
-            for (int c = 0; c < 2; ++c) { fsLoop.write (c, fsFbLp.tick (c, fsFbDelay.read (c, 0.018))); o[c] = o[c] * fd + sh[c] * fw; }
+            fsPh += hz / sr; fsPh -= std::floor (fsPh);
             fsFbDelay.advance(); fsLoop.advance();
         }
         {   // VINYL & LO-FI
-            const float ld = (float) lfDryG.next(), lw = (float) lfWetG.next(); lfLp.coeffs (lfLpF.next(), 0.85);
-            for (int c = 0; c < 2; ++c) { const float wv = lfLp.tick (c, wa::shapeCurve (lfCurve, o[c])); o[c] = o[c] * ld + wv * lw; }
+            const float ld = (float) lfDryG.next(), lw = (float) lfWetG.next(); const double lfF = lfLpF.next();
+            if (! sLofi) { lfLp.coeffs (lfF, 0.85); for (int c = 0; c < 2; ++c) { const float wv = lfLp.tick (c, wa::shapeCurve (lfCurve, o[c])); o[c] = o[c] * ld + wv * lw; } }
         }
         {   // DUB SPACE ECHO
-            const float ds = (float) dubSendG.next(), dw = (float) dubWetG.next(), dg = (float) dubFbG.next(); const double tl = dubTL.next(), tr = dubTR.next();
-            dubHp.coeffs (210, 1); dubLp.coeffs (1850, 1);
-            float y[2], sat[2];
-            for (int c = 0; c < 2; ++c) { y[c] = dubLp.tick (c, dubHp.tick (c, dubD.read (c, c ? tr : tl))); sat[c] = wa::shapeCurve (dubCurve, y[c]) * dg; }
-            dubD.write (0, o[0] * ds + dubLoop.read (1)); dubD.write (1, o[1] * ds + sat[0]); dubLoop.write (1, sat[1]);
+            const float ds = (float) dubSendG.next(), dwet = (float) dubWetG.next(), dg = (float) dubFbG.next(); const double tl = dubTL.next(), tr = dubTR.next();
+            if (! sDub)
+            {
+                dubHp.coeffs (210, 1); dubLp.coeffs (1850, 1);
+                float y[2], sat[2];
+                for (int c = 0; c < 2; ++c) { y[c] = dubLp.tick (c, dubHp.tick (c, dubD.read (c, c ? tr : tl))); sat[c] = wa::shapeCurve (dubCurve, y[c]) * dg; }
+                dubD.write (0, o[0] * ds + dubLoop.read (1)); dubD.write (1, o[1] * ds + sat[0]); dubLoop.write (1, sat[1]);
+                for (int c = 0; c < 2; ++c) o[c] += y[c] * dwet;
+            }
             dubD.advance(); dubLoop.advance();
-            for (int c = 0; c < 2; ++c) o[c] += y[c] * dw;
         }
         {   // SPRING TANK
             const float ss = (float) spSendG.next(), sw = (float) spWetG.next(), sg = (float) spFbG.next(); const double q = spQ.next();
-            spHp.coeffs (240, 1); spAp[0].coeffs (620, q); spAp[1].coeffs (1180, q * 1.1); spAp[2].coeffs (1950, q * 1.2); spLp.coeffs (2300, 1); spDamp.coeffs (3000, 1);
-            float y[2], x[2];
-            for (int c = 0; c < 2; ++c) { float v = spHp.tick (c, o[c] * ss); for (auto& a : spAp) v = a.tick (c, v); x[c] = spLp.tick (c, v); }
-            y[0] = spD.read (0, 0.041); y[1] = spD.read (1, 0.053);
-            const float toR = spDamp.tick (0, y[0]) * sg, toL = spDamp.tick (1, y[1]) * sg;
-            spD.write (0, x[0] + spLoop.read (0)); spD.write (1, x[1] + toR); spLoop.write (0, toL);
+            if (! sSpring)
+            {
+                spHp.coeffs (240, 1); spAp[0].coeffs (620, q); spAp[1].coeffs (1180, q * 1.1); spAp[2].coeffs (1950, q * 1.2); spLp.coeffs (2300, 1); spDamp.coeffs (3000, 1);
+                float y[2], x[2];
+                for (int c = 0; c < 2; ++c) { float v = spHp.tick (c, o[c] * ss); for (auto& a : spAp) v = a.tick (c, v); x[c] = spLp.tick (c, v); }
+                y[0] = spD.read (0, 0.041); y[1] = spD.read (1, 0.053);
+                const float toR = spDamp.tick (0, y[0]) * sg, toL = spDamp.tick (1, y[1]) * sg;
+                spD.write (0, x[0] + spLoop.read (0)); spD.write (1, x[1] + toR); spLoop.write (0, toL);
+                for (int c = 0; c < 2; ++c) o[c] += y[c] * sw;
+            }
             spD.advance(); spLoop.advance();
-            for (int c = 0; c < 2; ++c) o[c] += y[c] * sw;
         }
         gc.process (&o[0], &o[1], 1);   // GRANULAR CLOUD (untouched pass-through when off)
         {   // ENSEMBLE: sine on the left line, triangle at 1.47x on the right with opposite depth, both rolled off at 3.4 kHz
             const double r = enRateP.next(), d = enDepthP.next(); const float ed = (float) enDryG.next(), ew = (float) enWetG.next();
-            const double l1 = std::sin (2 * wa::PI * enPh1), l2 = 2 / wa::PI * std::asin (std::sin (2 * wa::PI * enPh2));
+            if (! sEns)
+            {
+                const double l1 = std::sin (2 * wa::PI * enPh1), l2 = 2 / wa::PI * std::asin (std::sin (2 * wa::PI * enPh2));
+                enLp.coeffs (3400, 1); enD.write (0, o[0]); enD.write (1, o[1]);
+                const float wl = enLp.tick (0, enD.read (0, 0.008 + d * l1)), wr = enLp.tick (1, enD.read (1, 0.011 - d * l2));
+                o[0] = o[0] * ed + wl * ew; o[1] = o[1] * ed + wr * ew;
+            }
             enPh1 += r / sr; enPh1 -= std::floor (enPh1); enPh2 += r * 1.47 / sr; enPh2 -= std::floor (enPh2);
-            enLp.coeffs (3400, 1); enD.write (0, o[0]); enD.write (1, o[1]);
-            const float wl = enLp.tick (0, enD.read (0, 0.008 + d * l1)), wr = enLp.tick (1, enD.read (1, 0.011 - d * l2)); enD.advance();
-            o[0] = o[0] * ed + wl * ew; o[1] = o[1] * ed + wr * ew;
+            enD.advance();
         }
         {   // VINTAGE ROTARY
-            const double l = std::sin (2 * wa::PI * rotPh), dep = rotDepG.next(), am = rotAmG.next(); rotPh += rotHz.next() / sr; rotPh -= std::floor (rotPh);
-            const float rw = (float) rotWetG.next(), rdr = (float) rotDryG.next(); rotLp.coeffs (3200, 1);
-            for (int c = 0; c < 2; ++c) rotD.write (c, rotLp.tick (c, o[c]));
-            const float wl = rotD.read (0, 0.006 + dep * l) * (float) (1 + am * l), wr = rotD.read (1, 0.006 - dep * l) * (float) (1 - am * l); rotD.advance();
-            o[0] = o[0] * rdr + wl * rw; o[1] = o[1] * rdr + wr * rw;
+            const double dep = rotDepG.next(), am = rotAmG.next(), rhz = rotHz.next();
+            const float rw = (float) rotWetG.next(), rdr = (float) rotDryG.next();
+            if (! sRot)
+            {
+                const double l = std::sin (2 * wa::PI * rotPh); rotLp.coeffs (3200, 1);
+                for (int c = 0; c < 2; ++c) rotD.write (c, rotLp.tick (c, o[c]));
+                const float wl = rotD.read (0, 0.006 + dep * l) * (float) (1 + am * l), wr = rotD.read (1, 0.006 - dep * l) * (float) (1 - am * l);
+                o[0] = o[0] * rdr + wl * rw; o[1] = o[1] * rdr + wr * rw;
+            }
+            rotPh += rhz / sr; rotPh -= std::floor (rotPh);
+            rotD.advance();
         }
         {   // VOWEL MORPH
-            const double l = std::sin (2 * wa::PI * vowPh); vowPh += vowHz.next() / sr; vowPh -= std::floor (vowPh);
-            const double q = vowQ.next(); vowF1.coeffs (std::max (20.0, vowB1.next() + vowM1.next() * l), q); vowF2.coeffs (std::max (20.0, vowB2.next() + vowM2.next() * l), q * 1.1); vowBody.coeffs (900, 1);
+            const double vhz = vowHz.next(); const double q = vowQ.next();
+            const double b1 = vowB1.next(), m1 = vowM1.next(), b2 = vowB2.next(), m2 = vowM2.next();
             const float vw = (float) vowWetG.next(), vd = (float) vowDryG.next();
-            for (int c = 0; c < 2; ++c) o[c] = o[c] * vd + (vowF1.tick (c, o[c]) + vowF2.tick (c, o[c]) + vowBody.tick (c, o[c])) * vw;
+            if (! sVow)
+            {
+                const double l = std::sin (2 * wa::PI * vowPh);
+                vowF1.coeffs (std::max (20.0, b1 + m1 * l), q); vowF2.coeffs (std::max (20.0, b2 + m2 * l), q * 1.1); vowBody.coeffs (900, 1);
+                for (int c = 0; c < 2; ++c) o[c] = o[c] * vd + (vowF1.tick (c, o[c]) + vowF2.tick (c, o[c]) + vowBody.tick (c, o[c])) * vw;
+            }
+            vowPh += vhz / sr; vowPh -= std::floor (vowPh);
         }
         {   // STEREO AUTO-PAN (lows below 160 Hz untouched)
-            const double w = apTri ? (apPh < 0.25 ? 4 * apPh : apPh < 0.75 ? 2 - 4 * apPh : 4 * apPh - 4) : std::sin (2 * wa::PI * apPh); apPh += apHz.next() / sr; apPh -= std::floor (apPh);
+            const double w = sAp ? 0 : apTri ? (apPh < 0.25 ? 4 * apPh : apPh < 0.75 ? 2 - 4 * apPh : 4 * apPh - 4) : std::sin (2 * wa::PI * apPh); apPh += apHz.next() / sr; apPh -= std::floor (apPh);
             const double dep = apDepG.next(); const float aw = (float) apWetG.next(), ad = (float) apDryG.next();
-            for (auto* b : { &apLo1, &apLo2, &apHi1, &apHi2 }) b->coeffs (160, -3.0103);
-            for (int c = 0; c < 2; ++c) { const float lo = apLo2.tick (c, apLo1.tick (c, o[c])), hi = apHi2.tick (c, apHi1.tick (c, o[c]));
-                o[c] = o[c] * ad + (lo + hi * (float) (c ? 1 - dep * w : 1 + dep * w)) * aw; }
+            if (! sAp)
+            {
+                for (auto* b : { &apLo1, &apLo2, &apHi1, &apHi2 }) b->coeffs (160, -3.0103);
+                for (int c = 0; c < 2; ++c) { const float lo = apLo2.tick (c, apLo1.tick (c, o[c])), hi = apHi2.tick (c, apHi1.tick (c, o[c]));
+                    o[c] = o[c] * ad + (lo + hi * (float) (c ? 1 - dep * w : 1 + dep * w)) * aw; }
+            }
         }
         {   // BARBERPOLE PHASER
             bpPhase += bpSpeed / sr; bpPhase -= std::floor (bpPhase);
             if (++bpCount >= 16) { bpCount = 0; for (int i = 0; i < 6; ++i) { double p = bpPhase + i / 6.0; p -= std::floor (p); bpAp[i].coeffs (160 * std::pow (14.0, p), 1.6); } }
-            bpLp.coeffs (2800, 1); const float fb = (float) bpFbG.next(), bw = (float) bpWetG.next(), bd = (float) bpDryG.next();
-            for (int c = 0; c < 2; ++c) { float v = o[c] + bpLoop.read (c) * fb; for (auto& a : bpAp) v = a.tick (c, v); const float y = bpLp.tick (c, v); bpLoop.write (c, y); o[c] = o[c] * bd + y * bw; }
+            const float fb = (float) bpFbG.next(), bwt = (float) bpWetG.next(), bdr = (float) bpDryG.next();
+            if (! sBp)
+            {
+                bpLp.coeffs (2800, 1);
+                for (int c = 0; c < 2; ++c) { float v = o[c] + bpLoop.read (c) * fb; for (auto& a : bpAp) v = a.tick (c, v); const float y = bpLp.tick (c, v); bpLoop.write (c, y); o[c] = o[c] * bdr + y * bwt; }
+            }
             bpLoop.advance();
         }
         {   // WARM RING TREM
-            const double car = std::sin (2 * wa::PI * rtPh); rtPh += rtHz.next() / sr; rtPh -= std::floor (rtPh);
-            const float g = (float) (rtDepG.next() * car), rw = (float) rtWetG.next(), rdr = (float) rtDryG.next(); rtPre.coeffs (2600, 1); rtPost.coeffs (rtPostF.next(), 1);
-            for (int c = 0; c < 2; ++c) o[c] = o[c] * rdr + rtPost.tick (c, rtPre.tick (c, o[c]) * g) * rw;
+            const double car = sRt ? 0 : std::sin (2 * wa::PI * rtPh); rtPh += rtHz.next() / sr; rtPh -= std::floor (rtPh);
+            const float g = (float) (rtDepG.next() * car), rw = (float) rtWetG.next(), rdr = (float) rtDryG.next(); const double rpf = rtPostF.next();
+            if (! sRt) { rtPre.coeffs (2600, 1); rtPost.coeffs (rpf, 1); for (int c = 0; c < 2; ++c) o[c] = o[c] * rdr + rtPost.tick (c, rtPre.tick (c, o[c]) * g) * rw; }
         }
         {   // DUB SIREN
             const float bw = (float) srWetG.next(), fb = (float) srFbG.next(); srBp.coeffs (srBpF.next(), 1.8); srLp.coeffs (2600, 1);
@@ -610,44 +709,64 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             srD.advance();
         }
         {   // ANALOG TAPE
-            const float td = (float) tpDryG.next(), tw = (float) tpWetG.next(); const double wow = tpWowG.next();
-            tpHead.coeffs (tpHeadF.next(), -3.0103);
-            const double dt = 0.008 + wow * std::sin (2 * wa::PI * tpPh); tpPh += 1.4 / sr; tpPh -= std::floor (tpPh);
-            float w[2]; for (int c = 0; c < 2; ++c) { tpWowD.write (c, tpHead.tick (c, tpShaper.tick (c, o[c], tpCurve))); w[c] = tpWowD.read (c, dt); }
+            const float td = (float) tpDryG.next(), tw = (float) tpWetG.next(); const double wow = tpWowG.next(); const double thf = tpHeadF.next();
+            if (! sTape)
+            {
+                tpHead.coeffs (thf, -3.0103);
+                const double dt = 0.008 + wow * std::sin (2 * wa::PI * tpPh);
+                float w[2]; for (int c = 0; c < 2; ++c) { tpWowD.write (c, tpHead.tick (c, tpShaper.tick (c, o[c], tpCurve))); w[c] = tpWowD.read (c, dt); }
+                for (int c = 0; c < 2; ++c) o[c] = o[c] * td + w[c] * tw;
+            }
+            tpPh += 1.4 / sr; tpPh -= std::floor (tpPh);
             tpShaper.advance(); tpWowD.advance();
-            for (int c = 0; c < 2; ++c) o[c] = o[c] * td + w[c] * tw;
         }
         {
             const float md = (float) mstDry.next(), mw = (float) mstWet.next();
-            const double hpF = mstHpF.next(), monoF = mstMonoF.next(), airDb = mstAirDb.next();
-            mstHp.coeffs (hpF, -3.0103); mstShelf.coeffs (8500, airDb); mstWarm.coeffs (mstWarmF.next(), -3.0103); mstTame.coeffs (3200, mstTameDb.next()); mstSide1.coeffs (monoF, -3.0103); mstSide2.coeffs (monoF, -3.0103);
-            float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstTame.tick (c, mstWarm.tick (c, mstShelf.tick (c, mstHp.tick (c, o[c]))));
-            const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f)) * (float) mstWidthG.next();
-            if (mw > 0) { o[0] = o[0] * md + (mid + side) * mw; o[1] = o[1] * md + (mid - side) * mw; }
+            const double hpF = mstHpF.next(), monoF = mstMonoF.next(), airDb = mstAirDb.next(), warmF = mstWarmF.next(), tameDb = mstTameDb.next(); const float mwid = (float) mstWidthG.next();
+            if (! sMst)
+            {
+                mstHp.coeffs (hpF, -3.0103); mstShelf.coeffs (8500, airDb); mstWarm.coeffs (warmF, -3.0103); mstTame.coeffs (3200, tameDb); mstSide1.coeffs (monoF, -3.0103); mstSide2.coeffs (monoF, -3.0103);
+                float h[2]; for (int c = 0; c < 2; ++c) h[c] = mstTame.tick (c, mstWarm.tick (c, mstShelf.tick (c, mstHp.tick (c, o[c]))));
+                const float mid = (h[0] + h[1]) * 0.5f, side = mstSide2.tick (0, mstSide1.tick (0, (h[0] - h[1]) * 0.5f)) * mwid;
+                if (mw > 0) { o[0] = o[0] * md + (mid + side) * mw; o[1] = o[1] * md + (mid - side) * mw; }
+            }
         }
         {   // TUBE CONSOLE
-            tcShelf.coeffs (55, tcSubDb.next()); tcSilk.coeffs (tcSilkF.next(), 0.55); const float tw = (float) tcWetG.next(), td = (float) tcDryG.next();
-            float y[2]; for (int c = 0; c < 2; ++c) y[c] = tcSilk.tick (c, tcShaper.tick (c, tcShelf.tick (c, o[c]), tcCurve)); tcShaper.advance();
-            for (int c = 0; c < 2; ++c) o[c] = o[c] * td + y[c] * tw;
+            const double subDb = tcSubDb.next(), silkF = tcSilkF.next(); const float tw = (float) tcWetG.next(), td = (float) tcDryG.next();
+            if (! sTc)
+            {
+                tcShelf.coeffs (55, subDb); tcSilk.coeffs (silkF, 0.55);
+                float y[2]; for (int c = 0; c < 2; ++c) y[c] = tcSilk.tick (c, tcShaper.tick (c, tcShelf.tick (c, o[c]), tcCurve));
+                for (int c = 0; c < 2; ++c) o[c] = o[c] * td + y[c] * tw;
+            }
+            tcShaper.advance();
         }
         {   // NY PARALLEL GLUE
             nyLp.coeffs (nyLpF.next(), 1); float w0 = nyLp.tick (0, o[0]), w1 = nyLp.tick (1, o[1]); nyComp.tick (w0, w1);
             const float nw = (float) nyWetG.next(); o[0] += w0 * nw; o[1] += w1 * nw;
         }
         {   // MASTER TILT & MONO
-            tlLow.coeffs (320, tlLowDb.next()); tlHigh.coeffs (1800, tlHighDb.next()); tlFocus.peakDb = tlFocusDb.next(); tlFocus.coeffs (95, 0.9);
+            const double lowDb = tlLowDb.next(), highDb = tlHighDb.next(), focusDb = tlFocusDb.next();
             const float tw = (float) tlWetG.next(), td = (float) tlDryG.next(), pass = (float) tlPassG.next(), sum = (float) tlSumG.next(), trim = (float) tlTrimG.next();
-            for (int c = 0; c < 2; ++c) o[c] = o[c] * td + tlFocus.tick (c, tlHigh.tick (c, tlLow.tick (c, o[c]))) * tw;
+            if (! sTl)
+            {
+                tlLow.coeffs (320, lowDb); tlHigh.coeffs (1800, highDb); tlFocus.peakDb = focusDb; tlFocus.coeffs (95, 0.9);
+                for (int c = 0; c < 2; ++c) o[c] = o[c] * td + tlFocus.tick (c, tlHigh.tick (c, tlLow.tick (c, o[c]))) * tw;
+            }
             const float mid = (o[0] + o[1]) * 0.5f; o[0] = (o[0] * pass + mid * sum) * trim; o[1] = (o[1] * pass + mid * sum) * trim;
         }
         {   // DJ ISOLATOR
             const float idr = (float) isoDry.next(), ib = (float) isoBands.next(), gl = (float) isoLoG.next(), gm = (float) isoMidG.next(), gh = (float) isoHiG.next();
-            for (auto* b : { &isoL1, &isoL2, &isoM1, &isoM2 }) b->coeffs (180, -3.0103);
-            for (auto* b : { &isoM3, &isoM4, &isoH1, &isoH2 }) b->coeffs (2800, -3.0103);
             isoHp.coeffs (isoHpF.next(), 2.92); isoLp.coeffs (isoLpF.next(), 0.83);
-            for (int c = 0; c < 2; ++c) { const float x = o[c];
-                const float lo = isoL2.tick (c, isoL1.tick (c, x)), mid = isoM4.tick (c, isoM3.tick (c, isoM2.tick (c, isoM1.tick (c, x)))), hi = isoH2.tick (c, isoH1.tick (c, x));
-                o[c] = isoLp.tick (c, isoHp.tick (c, x * idr + (lo * gl + mid * gm + hi * gh) * ib)); }
+            if (! sIso)
+            {
+                for (auto* b : { &isoL1, &isoL2, &isoM1, &isoM2 }) b->coeffs (180, -3.0103);
+                for (auto* b : { &isoM3, &isoM4, &isoH1, &isoH2 }) b->coeffs (2800, -3.0103);
+                for (int c = 0; c < 2; ++c) { const float x = o[c];
+                    const float lo = isoL2.tick (c, isoL1.tick (c, x)), mid = isoM4.tick (c, isoM3.tick (c, isoM2.tick (c, isoM1.tick (c, x)))), hi = isoH2.tick (c, isoH1.tick (c, x));
+                    o[c] = isoLp.tick (c, isoHp.tick (c, x * idr + (lo * gl + mid * gm + hi * gh) * ib)); }
+            }
+            else for (int c = 0; c < 2; ++c) o[c] = isoLp.tick (c, isoHp.tick (c, o[c] * idr));
         }
         limiter.tick (o[0], o[1]);
         const float m = (float) master.next();

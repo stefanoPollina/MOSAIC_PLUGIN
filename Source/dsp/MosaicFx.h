@@ -127,6 +127,13 @@ private:
     wa::Biquad tcShelf, tcSilk; wa::Shaper2x tcShaper; std::vector<float> tcCurve; double tcKey = -1; wa::Param tcSubDb, tcSilkF, tcWetG, tcDryG;
     wa::Biquad nyLp; wa::Compressor nyComp; wa::Param nyLpF, nyWetG;
     wa::Biquad tlLow, tlHigh, tlFocus; wa::Param tlLowDb, tlHighDb, tlFocusDb, tlWetG, tlDryG, tlPassG, tlSumG, tlTrimG;
+    // CPU: an effect that is switched off (its wet level settled at 0 and its dry at 1, so it adds exactly nothing) stops
+    // processing once its tail has had time to die away, and starts again from silence when it is switched back on.
+    // Its levels, rates and phases keep running while it rests, so everything else stays sample-for-sample as before.
+    struct Nap { long long off = 0; bool asleep = false; };
+    Nap napDrive, napPhaser, napShimmer, napAir, napReverb, napBus, napFs, napLofi, napDub, napSpring, napEns, napRot, napVow, napAp, napBp, napRt,
+        napTape, napMst, napTc, napTl, napIso;
+    static bool at (const wa::Param& p, double x) { return ! p.moving && p.v == x; }
     long long frame = 0;
     void setTarget (wa::Param& p, double v) { p.setTarget (v, 0.03, sr); }
     void applyBus (double beat);

@@ -120,6 +120,7 @@ struct Delay   // stereo DelayNode, rebuilt with Chrome's own buffer length and 
         for (auto& b : buf) b.assign ((size_t) len, 0.f); w = 0; written = 0;
     }
     void reset() { for (auto& b : buf) std::fill (b.begin(), b.end(), 0.f); w = 0; written = 0; }
+    void clear() { for (auto& b : buf) std::fill (b.begin(), b.end(), 0.f); }   // silence only: the write position and clock carry on
     // Chrome builds a DelayNode's kernels for one channel and only adds the second after its first render quantum,
     // so the right channel is silent for the very first quantum (its input is still stored).
     bool monoFirstQuantum = false; long long written = 0;
@@ -144,6 +145,7 @@ struct Lag128
 {
     float buf[2][128] {}; int pos = 0;
     void reset() { for (auto& b : buf) for (auto& x : b) x = 0; pos = 0; }
+    void clear() { for (auto& b : buf) for (auto& x : b) x = 0; }
     float read (int c) const { return buf[c][pos]; }
     void write (int c, float x) { buf[c][pos] = x; }
     void advance() { pos = (pos + 1) & 127; }
