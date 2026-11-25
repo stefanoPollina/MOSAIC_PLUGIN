@@ -22,7 +22,7 @@ bool MosaicFxProcessor::isBusesLayoutSupported (const BusesLayout& l) const
 
 void MosaicFxProcessor::prepareToPlay (double sampleRate, int)
 {
-    sr = sampleRate; frames = 0; appliedBpm = -1;
+    sr = sampleRate; frames = 0; appliedBpm = -1; freeBeat = 0; lfoWasOn = false; pre.prepare (sr);
     fx.prepare (sr, (uint32_t) juce::Random::getSystemRandom().nextInt());
     fx.externalImpulses = false;
     if (auto* p = pending.exchange (nullptr)) { if (live) delete retired.exchange (live.release()); live.reset (p); }
@@ -40,6 +40,26 @@ void MosaicFxProcessor::installFx (const juce::var& m)
     full->setProperty ("fx", m["fx"]); full->setProperty ("master", 1.0); seq->setProperty ("bpm", m["bpm"]); full->setProperty ("seq", juce::var (seq.get()));
     p->fx = mosaic::FxState::fromJson (toValue (juce::var (full.get())));
     p->fx.master = 1.0;   // an effect on a track: unity, the track fader does the rest
+    {   // the synth's voice-bus effects, from the same FX page switches the synth reads (fx.duckOn, fx.combOn, fx.envOn, fx.fgOn)
+        const juce::var& f = m["fx"]; auto num = [&f] (const char* k, double d) { const auto& v = f[k]; return v.isDouble() || v.isInt() || v.isInt64() ? (double) v : d; };
+        auto& P = p->pre;
+        P.duck = (bool) f["duckOn"] && num ("duckDepth", 0) > 0; P.duckDepth = num ("duckDepth", 0); P.duckRel = num ("duckRelease", 0.55); P.duckShape = num ("duckShape", 0.35);
+        P.comb = (bool) f["combOn"]; P.combTune = num ("combTune", 0.35); P.combFb = num ("combFb", 0.55); P.combMix = num ("combMix", 0.35);
+        P.env = (bool) f["envOn"]; P.envSens = num ("envSens", 0.65); P.envRes = num ("envRes", 0.48); P.envRange = num ("envRange", 0.55);
+        P.fg = (bool) f["fgOn"]; P.fgCut = num ("fgCut", 0.42); P.fgRes = num ("fgRes", 0.35); P.fgDepth = num ("fgDepth", 0.85);
+        if (auto* st = f["fgSteps"].getArray()) for (int i = 0; i < 16; ++i) P.fgSteps[i] = i < st->size() && (double) (*st)[i] != 0 ? 1 : 0;
+        // the FX Suite's LFOs (fx.lfo: three lanes)
+        if (auto* lanes = f["lfo"].getArray())
+            for (int k = 0; k < 3 && k < lanes->size(); ++k)
+            {
+                const juce::var& o = (*lanes)[k]; auto& l = p->lfo[(size_t) k];
+                l.on = (bool) o["on"]; l.depth = juce::jlimit (-1.0, 1.0, (double) o["depth"]); l.div = juce::jlimit (0.0625, 64.0, o["div"].isVoid() ? 4.0 : (double) o["div"]);
+                l.shape = mosaicfx::shapeIndex (o["shape"].toString().toStdString()); l.dest = -1;
+                const auto key = o["dest"].toString().toStdString(); const auto& D = mosaicfx::dests();
+                for (size_t d = 0; d < D.size(); ++d) if (key == D[d].key) l.dest = (int) d;
+                if (auto* s = o["steps"].getArray()) for (int i = 0; i < 16; ++i) l.steps[i] = i < s->size() ? (float) juce::jlimit (0.0, 1.0, (double) (*s)[i]) : 0.f;
+            }
+    }
     const double decay = mosaic::MosaicFx::decayFor (p->fx);
     if (std::abs (decay - lastDecay) > 0.25)
     {
@@ -78,13 +98,14 @@ void MosaicFxProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     const int N = buffer.getNumSamples(), chans = buffer.getNumChannels();
     if (N <= 0 || chans <= 0) return;
 
-    double hostBpm = -1;
+    double hostBpm = -1, hostPpq = 0; bool hostPlaying = false;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
         {
             const std::lock_guard<std::mutex> l (trLock);
             tr.hasTempo = pos->getBpm().hasValue(); if (tr.hasTempo) { tr.bpm = *pos->getBpm(); hostBpm = tr.bpm; }
             tr.hasTransport = true; tr.playing = pos->getIsPlaying(); tr.ppq = pos->getPpqPosition().orFallback (0); tr.time = frames.load() / sr;
+            hostPlaying = tr.playing && pos->getPpqPosition().hasValue(); hostPpq = tr.ppq;
         }
 
     const double now = frames.load() / sr;
@@ -103,11 +124,20 @@ void MosaicFxProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
     auto* L = buffer.getWritePointer (0); auto* R = chans > 1 ? buffer.getWritePointer (1) : nullptr;
     float tmpR[128];
+    // the beat clock: the DAW's position while it plays (gates, pumps and LFOs stay on the grid), otherwise free-running at its tempo
+    const double bpm = live ? live->fx.bpm : 120, bps = bpm / 60.0 / sr;
+    const double beat0 = hostPlaying ? hostPpq : freeBeat;
+    bool lfoOn = false; if (live) for (auto& l : live->lfo) lfoOn = lfoOn || (l.on && l.dest >= 0 && l.depth != 0);
+    if (! lfoOn && lfoWasOn && live) fx.apply (live->fx, now);   // LFOs just stopped: back to the knobs' own settings
+    lfoWasOn = lfoOn;
     for (int off = 0; off < N; off += 128)
     {
         const int n = std::min (128, N - off);
         float* l = L + off; float* r = R ? R + off : tmpR;
         if (! R) std::memcpy (tmpR, l, sizeof (float) * (size_t) n);   // a mono track: the bus runs in stereo, L is written back
+        const double beat = beat0 + off * bps;
+        if (live && live->pre.any()) pre.process (l, r, n, beat, bps, live->pre);
+        if (lfoOn) { mosaic::FxState s = live->fx; mosaicfx::modulate (s, live->lfo, beat); fx.apply (s, (frames.load() + off) / sr); }
         fx.process (l, r, n, (frames.load() + off) / sr);
         for (int i = 0; i < n; ++i)
         {   // never hand the DAW a non-finite sample
@@ -120,7 +150,7 @@ void MosaicFxProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         const auto w = outFifo.write (1);
         if (w.blockSize1 > 0) { outBuf[(size_t) w.startIndex1 * 2] = L[i]; outBuf[(size_t) w.startIndex1 * 2 + 1] = R ? R[i] : L[i]; }
     }
-    frames = frames.load() + N;
+    frames = frames.load() + N; freeBeat = hostPlaying ? hostPpq + N * bps : freeBeat + N * bps;
     const double secs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
     cpuLoad = (float) (0.9 * cpuLoad.load() + 0.1 * (secs / (N / sr)));
 }

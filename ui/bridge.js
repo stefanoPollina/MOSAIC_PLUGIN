@@ -9,7 +9,7 @@
   const MP = window.MosaicPlugin = { active: true };
 
   /* ---------- Mosaic FX (the separate effect plugin): only the FX bus is shown and used ---------- */
-  let FXO = false, fresh = false;
+  let FXO = false, fresh = false, lfoDefaults = () => null;
   try {
     const init = window.__JUCE__.initialisationData || {};
     FXO = !!(init.mosaicFxOnly && init.mosaicFxOnly[0]);
@@ -17,6 +17,14 @@
   } catch (e) { /* not the FX plugin */ }
   MP.fxOnly = FXO;
   if (FXO) {
+    // MOSAIC LFOs are the FX Suite's own: the page rebuilds its settings from the controls it knows when it starts, so the bridge
+    // keeps them (from the project, or from a state the DAW has just restored) and adds them to everything it sends and saves
+    try {
+      const fromRestore = sessionStorage.getItem('mosaicfx-lfo'); sessionStorage.removeItem('mosaicfx-lfo');
+      const init = window.__JUCE__.initialisationData || {}, saved = init.mosaicState && init.mosaicState[0];
+      const l = fromRestore ? JSON.parse(fromRestore) : saved && saved.length > 2 ? (JSON.parse(saved).fx || {}).lfo : null;
+      if (Array.isArray(l) && l.length === 3) MP.lfoCfg = l;
+    } catch (e) { /* defaults */ }
     document.documentElement.classList.add('mosaic-fx-only');
     const css = document.createElement('style');
     css.textContent = 'html.mosaic-fx-only nav.tabs>button:not([data-page="fx"]),html.mosaic-fx-only #layerChip,html.mosaic-fx-only .layer-edit,' +
@@ -34,8 +42,73 @@
         try { const st = window.MosaicBank && window.MosaicBank.getState(); if (st && st.fx) { st.fx.reverbWet = 0; if (MP.engine) MP.engine.setState(st); } } catch (e) { console.error(e); }
       }
       if (!tab.classList.contains('on')) tab.click();
+      try { lfoCard(); xyNote(); } catch (e) { console.error(e); }
       requestAnimationFrame(() => requestAnimationFrame(reveal));
     };
+    /* ---- MOSAIC LFOs: three tempo-synced LFOs (or 16-step patterns) that move FX controls; the plugin runs them on the DAW's beat ---- */
+    const LFO_DESTS = [['busFilter', 'FILTER (bus DJ filter)'], ['djLpf', 'DJ ISOLATOR low-pass'], ['djHpf', 'DJ ISOLATOR high-pass'], ['phaserWet', 'PHASER mix'], ['chorusMix', 'CHORUS mix'],
+      ['ensMix', 'ENSEMBLE mix'], ['tremDepth', 'TREMOLO depth'], ['fsShift', 'PSY FREQ SHIFT shift'], ['fsMix', 'PSY FREQ SHIFT mix'], ['rotSpeed', 'VINTAGE ROTARY speed'], ['rotMix', 'VINTAGE ROTARY mix'],
+      ['vowPos', 'VOWEL MORPH position'], ['apDepth', 'STEREO AUTO-PAN depth'], ['bpMix', 'BARBERPOLE mix'], ['rtMix', 'WARM RING TREM mix'], ['delayWet', 'DELAY mix'], ['delayFb', 'DELAY feedback'],
+      ['ppMix', 'PING-PONG mix'], ['dubMix', 'DUB SPACE ECHO mix'], ['dubFb', 'DUB SPACE ECHO regen'], ['reverbWet', 'REVERB mix'], ['springMix', 'SPRING TANK mix'], ['gcMix', 'GRANULAR CLOUD mix'],
+      ['width', 'WIDTH'], ['tapeWow', 'ANALOG TAPE wow'], ['tlAngle', 'MASTER TILT angle']];
+    const LFO_RATES = [[0.25, '1/16'], [0.5, '1/8'], [0.75, '1/8 dot'], [1, '1/4'], [2, '1/2'], [4, '1 BAR'], [8, '2 BARS'], [16, '4 BARS'], [32, '8 BARS']];
+    const LFO_SHAPES = [['sine', 'SINE'], ['tri', 'TRIANGLE'], ['saw', 'SAW UP'], ['ramp', 'SAW DOWN'], ['square', 'SQUARE'], ['random', 'RANDOM'], ['steps', 'STEPS (16)']];
+    lfoDefaults = () => [
+      { on: false, dest: 'busFilter', div: 4, shape: 'sine', depth: -0.5, steps: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0] },
+      { on: false, dest: 'reverbWet', div: 0.25, shape: 'steps', depth: 0.5, steps: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1] },
+      { on: false, dest: 'dubMix', div: 1, shape: 'random', depth: 0.5, steps: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0] }];
+    const lfoState = () => {
+      const st = window.MosaicBank && window.MosaicBank.getState(); if (!st || !st.fx) return null;
+      if (!MP.lfoCfg) MP.lfoCfg = lfoDefaults(); st.fx.lfo = MP.lfoCfg;
+      return st;
+    };
+    const lfoSend = () => { const st = lfoState(); if (st && MP.engine) MP.engine.setState(st); };
+    const lfoCard = () => {
+      if (document.querySelector('.mfx-lfo')) return;
+      const motion = [...document.querySelectorAll('.fx-group')].find((g) => g.textContent.trim() === 'MOTION'); if (!motion || !lfoState()) return;
+      const css = document.createElement('style');
+      css.textContent = '.mfx-lfo .mfx-lane{display:grid;grid-template-columns:auto minmax(0,1.6fr) minmax(0,.9fr) minmax(0,1fr) minmax(0,1.3fr);gap:8px;align-items:center;margin:0 0 8px}' +
+        '.mfx-lfo .mfx-lane .switch{min-width:46px}.mfx-lfo .mfx-lane select{width:100%;margin:0}.mfx-lfo .dep{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.06em;opacity:.85}' +
+        '.mfx-lfo .dep input{flex:1;min-width:0;accent-color:currentColor}.mfx-lfo .dep span{width:42px;text-align:right}.mfx-lfo .steps{display:grid;grid-template-columns:repeat(16,1fr);gap:2px;margin:-2px 0 10px}' +
+        '.mfx-lfo .steps .switch{height:14px;min-width:0;padding:0;border-radius:3px}.mfx-lfo .mfx-lane.off select,.mfx-lfo .mfx-lane.off .dep{opacity:.45}';
+      document.head.appendChild(css);
+      const card = document.createElement('section'); card.className = 'panel fx-card fx-full mfx-lfo';
+      card.innerHTML = '<div class="fx-head"><h3>MOSAIC LFOs</h3></div>';
+      const opt = (sel, list, v) => { for (const [val, lab] of list) { const o = document.createElement('option'); o.value = String(val); o.textContent = lab; sel.append(o); } sel.value = String(v); };
+      for (let k = 0; k < 3; ++k) {
+        const L = () => lfoState().fx.lfo[k];
+        const lane = document.createElement('div'); lane.className = 'mfx-lane';
+        const on = document.createElement('button'); on.type = 'button'; on.className = 'switch';
+        const dest = document.createElement('select'), rate = document.createElement('select'), shape = document.createElement('select');
+        for (const x of [dest, rate, shape]) x.className = 'slim';
+        dest.title = 'What this LFO moves (switch that effect on too)'; rate.title = 'Cycle length (STEPS: length of one step)'; shape.title = 'Shape';
+        opt(dest, LFO_DESTS, L().dest); opt(rate, LFO_RATES, L().div); opt(shape, LFO_SHAPES, L().shape);
+        const dep = document.createElement('label'); dep.className = 'dep'; dep.innerHTML = 'DEPTH <input type="range" min="-100" max="100" step="1"><span></span>';
+        const range = dep.querySelector('input'), val = dep.querySelector('span');
+        const steps = document.createElement('div'); steps.className = 'steps';
+        const stepBtns = [...Array(16)].map((_, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'switch'; b.title = 'Step ' + (i + 1);
+          b.addEventListener('click', () => { const s = L().steps; s[i] = s[i] ? 0 : 1; paint(); lfoSend(); }); steps.append(b); return b; });
+        const paint = () => {
+          const l = L(); on.textContent = l.on ? 'ON' : 'OFF'; on.classList.toggle('on', !!l.on); lane.classList.toggle('off', !l.on);
+          range.value = Math.round(l.depth * 100); val.textContent = (l.depth > 0 ? '+' : '') + Math.round(l.depth * 100) + '%';
+          steps.style.display = l.shape === 'steps' ? '' : 'none'; stepBtns.forEach((b, i) => b.classList.toggle('on', !!l.steps[i]));
+        };
+        on.addEventListener('click', () => { L().on = !L().on; paint(); lfoSend(); });
+        dest.addEventListener('change', () => { L().dest = dest.value; lfoSend(); });
+        rate.addEventListener('change', () => { L().div = Number(rate.value); lfoSend(); });
+        shape.addEventListener('change', () => { L().shape = shape.value; paint(); lfoSend(); });
+        range.addEventListener('input', () => { L().depth = Number(range.value) / 100; paint(); lfoSend(); });
+        range.addEventListener('dblclick', () => { L().depth = 0.5; paint(); lfoSend(); });
+        lane.append(on, dest, rate, shape, dep); card.append(lane, steps); paint();
+      }
+      const note = document.createElement('p'); note.className = 'fx-note';
+      note.textContent = 'Three LFOs locked to your DAW’s tempo and bar. Each moves one FX control around where its knob is set (DEPTH below zero moves it the other way). STEPS plays a 16-step pattern, LFO SEQ style: lit steps push the control up by DEPTH. The effect being moved needs to be switched on.';
+      card.append(note);
+      motion.after(card);
+    };
+    // in the FX Suite the X/Y pad's left-right axis (the synth's layer A filter) has nothing to move: say so on the card
+    const xyNote = () => { const h = [...document.querySelectorAll('.fx-card h3')].find((e) => e.textContent.trim() === 'X/Y MORPH'); const n = h && h.closest('.fx-card').querySelector('.fx-note');
+      if (n && !n.dataset.fxo) { n.dataset.fxo = '1'; n.textContent = 'Builds and breakdowns. Bottom to top (DUB WASH): DUB SPACE ECHO and SPRING TANK come in and grow (echo wet, regen and splash); at the very bottom both switch off. In Mosaic FX Suite the left-right axis (the synth’s filter) has nothing to move.'; } };
     const reveal = () => document.documentElement.classList.add('fx-ready');
     setTimeout(reveal, 5000);   // safety: never leave the window blank
     window.addEventListener('load', () => setTimeout(toFx, 120));
@@ -46,7 +119,8 @@
     const init = window.__JUCE__.initialisationData || {}, saved = init.mosaicState && init.mosaicState[0];
     if (saved && saved.length > 2) localStorage.setItem('continuum-mosaic-last-state-v2', saved);
   } catch (e) { /* no saved state: Mosaic starts as it would in a browser */ }
-  J.addEventListener('restore', (r) => { try { if (r.state && r.state.length > 2) localStorage.setItem('continuum-mosaic-last-state-v2', r.state); } catch (e) {} location.reload(); });
+  J.addEventListener('restore', (r) => { try { if (r.state && r.state.length > 2) { localStorage.setItem('continuum-mosaic-last-state-v2', r.state);
+    if (FXO) { const l = (JSON.parse(r.state).fx || {}).lfo; if (Array.isArray(l)) sessionStorage.setItem('mosaicfx-lfo', JSON.stringify(l)); } } } catch (e) {} location.reload(); });
   // MIDI comes from the host (sample-accurate), not from the page's own Web MIDI
   try { Object.defineProperty(navigator, 'requestMIDIAccess', { value: undefined, configurable: true }); } catch (e) { /* read-only: harmless */ }
   // downloads (WAV, MIDI, presets, banks) become save dialogs
@@ -205,6 +279,7 @@
       gateFx() {} setReverbDecay() {} rampDrive() {} applyBus() {}
       setState(s) {
         if (!s) return; this.state = s;
+        if (FXO && s.fx) { if (!MP.lfoCfg) MP.lfoCfg = lfoDefaults(); s.fx.lfo = MP.lfoCfg; }
         try { if (window.MosaicWT) window.MosaicWT.hooks.state(this, s); } catch (e) { /* the TABLE editor only */ }
         if (!this.ready) return;
         const L = s.layers || {};

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <mutex>
 #include "../dsp/MosaicFx.h"
+#include "FxModules.h"
 
 class FxBrowserHost;
 
@@ -55,7 +56,8 @@ public:
 
 private:
     double sr = 48000; mosaic::MosaicFx fx;
-    struct Pack { mosaic::FxState fx; juce::AudioBuffer<float> impulse; double impulseSeconds = 0; bool hasImpulse = false; };
+    struct Pack { mosaic::FxState fx; mosaicfx::PreParams pre; std::array<mosaicfx::Lfo, 3> lfo; juce::AudioBuffer<float> impulse; double impulseSeconds = 0; bool hasImpulse = false; };
+    mosaicfx::FxPre pre; double freeBeat = 0; bool lfoWasOn = false;
     std::atomic<Pack*> pending { nullptr }, retired { nullptr };
     std::unique_ptr<Pack> live;
     double lastDecay = -1, appliedBpm = -1; juce::Random irRandom;
