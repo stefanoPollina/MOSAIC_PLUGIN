@@ -25,18 +25,23 @@
     const css = document.createElement('style');
     css.textContent = 'html.mosaic-fx-only nav.tabs>button:not([data-page="fx"]),html.mosaic-fx-only #layerChip,html.mosaic-fx-only .layer-edit,' +
       'html.mosaic-fx-only .presets,html.mosaic-fx-only .master-knob,html.mosaic-fx-only .voicebox,html.mosaic-fx-only footer.bed,html.mosaic-fx-only #mp-follow{display:none!important}' +
-      'html.mosaic-fx-only .plugin{grid-template-rows:58px 34px minmax(0,1fr)!important}';
+      'html.mosaic-fx-only .plugin{grid-template-rows:58px 34px minmax(0,1fr)!important}' +
+      // nothing shows until the FX page is up, so the synth's pages never flash first
+      'html.mosaic-fx-only{background:#0b0c0e}html.mosaic-fx-only:not(.fx-ready) body{visibility:hidden!important}';
     (document.head || document.documentElement).appendChild(css);
     const toFx = () => {
       const tab = document.querySelector('nav.tabs>button[data-page="fx"]'), brand = document.querySelector('.brand em');
       if (!tab) { setTimeout(toFx, 100); return; }
-      if (brand && brand.textContent.trim() === 'MOSAIC') brand.textContent = 'MOSAIC FX';
+      if (brand && brand.textContent.trim() === 'MOSAIC') brand.textContent = 'MOSAIC FX SUITE';
       if (fresh) {   // a new Mosaic FX on a track: every effect off, so the audio passes clean until something is switched on
         fresh = false;
         try { const st = window.MosaicBank && window.MosaicBank.getState(); if (st && st.fx) { st.fx.reverbWet = 0; if (MP.engine) MP.engine.setState(st); } } catch (e) { console.error(e); }
       }
       if (!tab.classList.contains('on')) tab.click();
+      requestAnimationFrame(() => requestAnimationFrame(reveal));
     };
+    const reveal = () => document.documentElement.classList.add('fx-ready');
+    setTimeout(reveal, 5000);   // safety: never leave the window blank
     window.addEventListener('load', () => setTimeout(toFx, 120));
   }
 
