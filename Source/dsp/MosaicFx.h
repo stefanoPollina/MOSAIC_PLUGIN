@@ -44,7 +44,7 @@ struct FxState
     bool tlOn = false, tlMono = false; double tlAngle = 0.38, tlFocus = 0.4, tlTrim = 0.5;   // MASTER TILT & MONO
     bool sirOn = false, sirHold = false; double sirDub = 0.55, sirGrit = 0.45, sirMix = 0.45, sirType = 0;    // DUB SIREN
     bool djOn = false, djKillLow = false, djKillMid = false, djKillHigh = false; double djHpf = 0, djLpf = 1, djCeil = 0.79;  // DJ ISOLATOR
-    double master = 0.8, bpm = 120;
+    double master = 0.8, bpm = 120; bool busBypass = false;   // A/B: the dry signal instead of the FX bus (into the safety limiter)
     static FxState fromJson (const json::Value& fullState);   // reads state.fx, state.master, state.seq.bpm as applyFx does
 };
 
@@ -134,6 +134,7 @@ private:
     Nap napDrive, napPhaser, napShimmer, napAir, napReverb, napBus, napFs, napLofi, napDub, napSpring, napEns, napRot, napVow, napAp, napBp, napRt,
         napTape, napMst, napTc, napTl, napIso;
     static bool at (const wa::Param& p, double x) { return ! p.moving && p.v == x; }
+    wa::Param abWet, abDry;
     long long frame = 0;
     void setTarget (wa::Param& p, double v) { p.setTarget (v, 0.03, sr); }
     void applyBus (double beat);

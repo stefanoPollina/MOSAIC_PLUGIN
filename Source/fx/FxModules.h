@@ -20,7 +20,7 @@ inline double clamp01 (double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
 struct PreParams
 {
-    bool duck = false; double duckDepth = 0, duckRel = 0.55, duckShape = 0.35;
+    bool duck = false; double duckDepth = 0, duckRel = 0.55, duckShape = 0.35, duckRate = 1;
     bool comb = false; double combTune = 0.35, combFb = 0.55, combMix = 0.35;
     bool env = false; double envSens = 0.65, envRes = 0.48, envRange = 0.55;
     bool fg = false; int fgSteps[16] {}; double fgCut = 0.42, fgRes = 0.35, fgDepth = 0.85;
@@ -65,7 +65,7 @@ public:
             double busL = L[i], busR = R[i];
             if (duck > 0)
             {
-                const double bp = beat - std::floor (beat);
+                const double dc = beat / (P.duckRate == 0.5 || P.duckRate == 0.75 ? P.duckRate : 1.0), bp = dc - std::floor (dc);
                 const double g = 1 - duck * (1 - (bp < 0.03 ? 1 - bp / 0.03 : std::pow (std::min (1.0, (bp - 0.03) / duckRel), duckExp)));
                 busL *= g; busR *= g;
             }

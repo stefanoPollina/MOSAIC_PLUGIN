@@ -50,7 +50,7 @@ FxState FxState::fromJson (const json::Value& s)
     f.tlOn = x["tlOn"].truthy(); f.tlMono = x["tlMono"].truthy(); f.tlAngle = numD (x["tlAngle"], 0.38); f.tlFocus = numD (x["tlFocus"], 0.4); f.tlTrim = numD (x["tlTrim"], 0.5);
     f.sirOn = x["sirOn"].truthy(); f.sirHold = x["sirHold"].truthy(); f.sirDub = numD (x["sirDub"], 0.55); f.sirGrit = numD (x["sirGrit"], 0.45); f.sirMix = numD (x["sirMix"], 0.45); f.sirType = numD (x["sirType"], 0);
     f.djOn = x["djOn"].truthy(); f.djKillLow = x["djKillLow"].truthy(); f.djKillMid = x["djKillMid"].truthy(); f.djKillHigh = x["djKillHigh"].truthy();
-    f.djHpf = numD (x["djHpf"], 0); f.djLpf = numD (x["djLpf"], 1); f.djCeil = numD (x["djCeil"], 0.79);
+    f.djHpf = numD (x["djHpf"], 0); f.djLpf = numD (x["djLpf"], 1); f.djCeil = numD (x["djCeil"], 0.79); f.busBypass = x["busBypass"].truthy();
     f.dubOn = x["dubOn"].truthy(); f.dubThrow = x["dubThrow"].truthy(); f.dubDiv = numD (x["dubDiv"], 1); f.dubFb = numD (x["dubFb"], 0.58); f.dubMix = numD (x["dubMix"], 0.38);
     f.tapeOn = x["tapeOn"].truthy(); f.tapeSat = numD (x["tapeSat"], 0.3); f.tapeHead = numD (x["tapeHead"], 0.45); f.tapeWow = numD (x["tapeWow"], 0.15);
     f.master = s["master"].numOr (0); f.bpm = s["seq"].isObject() && s["seq"]["bpm"].truthy() ? s["seq"]["bpm"].numOr (120) : 120;
@@ -132,7 +132,7 @@ void MosaicFx::prepare (double sampleRate, uint32_t seed)
     limiter.prepare (sr); limiter.threshold.init (-1.5); limiter.knee.init (0); limiter.ratio.init (12); limiter.attack.init (0.003); limiter.release.init (0.12);
     { const int n = 16385; const double a = 0.425, w = 0.075; safetyCurve.assign ((size_t) n, 0);
       for (int i = 0; i < n; ++i) { const double u = ((double) i / (n - 1)) * 2 - 1, m = std::abs (u); safetyCurve[(size_t) i] = (float) (m <= a ? u : (u < 0 ? -1 : 1) * (a + w * std::tanh ((m - a) / w))); } }
-    master.init (1);
+    master.init (1); abWet.init (1); abDry.init (0);
     for (Nap* z : { &napDrive, &napPhaser, &napShimmer, &napAir, &napReverb, &napBus, &napFs, &napLofi, &napDub, &napSpring, &napEns, &napRot, &napVow, &napAp, &napBp, &napRt, &napTape, &napMst, &napTc, &napTl, &napIso }) *z = Nap();
 }
 
@@ -332,6 +332,7 @@ void MosaicFx::apply (const FxState& f, double now)
     if (f.compOn) { setTarget (comp.threshold, f.compThreshold); setTarget (comp.ratio, std::max (1.0, f.compRatio)); setTarget (comp.attack, std::max (0.001, f.compAttack)); setTarget (comp.release, std::max (0.02, f.compRelease)); }
     else { setTarget (comp.threshold, 0); setTarget (comp.ratio, 1); setTarget (comp.attack, 0.01); setTarget (comp.release, 0.1); }
     setTarget (master, std::max (0.0, f.master));
+    setTarget (abWet, f.busBypass ? 0 : 1); setTarget (abDry, f.busBypass ? 1 : 0);
 }
 
 void MosaicFx::testForce (const std::string& n, double v)
@@ -434,13 +435,13 @@ void MosaicFx::process (float* L, float* R, int n, double now)
     pullTimes (delayTime, tDelay, n, firstQ); pullTimes (ppTime, tPp, n, firstQ);
     for (int b = 0; b < 3; ++b) pullTimes (multi[(size_t) b].time, tMulti[b], n, firstQ);
     revBuf.setSize (2, n, false, false, true);
-    float fxPreL[128], fxPreR[128];
+    float fxPreL[128], fxPreR[128], dryIn[2][128];
     for (int i = 0; i < n; ++i)
     {
         const double t = (double) (frame + i) / sr;
         while (! gateEvents.empty() && gateEvents.front().time <= t) { gate.setTarget (gateEvents.front().value, 0.004, sr, (int) ((frame + i) & 127)); gateEvents.erase (gateEvents.begin()); }
         const float g = (float) gate.next();
-        float x[2] = { L[i] * g, R[i] * g };
+        float x[2] = { L[i] * g, R[i] * g }; dryIn[0][i] = x[0]; dryIn[1][i] = x[1];
         // drive
         const float dd = (float) driveDry.next(), dwt = (float) driveWet.next();
         float ds[2] = { x[0], x[1] };
@@ -768,6 +769,7 @@ void MosaicFx::process (float* L, float* R, int n, double now)
             }
             else for (int c = 0; c < 2; ++c) o[c] = isoLp.tick (c, isoHp.tick (c, o[c] * idr));
         }
+        { const float aw = (float) abWet.next(), ad = (float) abDry.next(); if (ad != 0 || aw != 1) for (int c = 0; c < 2; ++c) o[c] = o[c] * aw + dryIn[c][i] * ad; }
         limiter.tick (o[0], o[1]);
         const float m = (float) master.next();
         for (int c = 0; c < 2; ++c) o[c] = wa::shapeCurve (safetyCurve, o[c] * 0.5f) * 2 * m;

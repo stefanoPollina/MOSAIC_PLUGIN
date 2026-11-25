@@ -119,7 +119,7 @@ int xDest (const std::string& n)
 State stateFromJson (const json::Value& v)
 {
     State S; S.present = v.isObject(); if (! S.present) return S;
-    S.bendRange = num (v["bendRange"]); S.detune = num (v["detune"]); S.unison = num (v["unison"]); S.bpm = num (v["bpm"]); S.duck = num (v["duck"]); S.duckRel = num (v["duckRel"]); S.duckShape = num (v["duckShape"]);
+    S.bendRange = num (v["bendRange"]); S.detune = num (v["detune"]); S.unison = num (v["unison"]); S.bpm = num (v["bpm"]); S.duck = num (v["duck"]); S.duckRel = num (v["duckRel"]); S.duckShape = num (v["duckShape"]); S.duckRate = num (v["duckRate"]);
     { const auto& K = v["comb"]; if (K.isObject()) { S.combOn = true; S.combTune = K["tune"].numOr (0.35); S.combFb = K["fb"].numOr (0.55); S.combMix = K["mix"].numOr (0.35); } }
     { const auto& E = v["envf"]; if (E.isObject()) { S.envOn = true; S.envSens = E["sens"].numOr (0.65); S.envRes = E["res"].numOr (0.48); S.envRange = E["range"].numOr (0.55); } }
     { const auto& G = v["fg"]; if (G["steps"].size() > 0) { S.fgOn = true; for (size_t i = 0; i < 16; ++i) S.fgSteps[i] = i < G["steps"].size() && G["steps"][i].numOr (0) != 0 ? 1 : 0;

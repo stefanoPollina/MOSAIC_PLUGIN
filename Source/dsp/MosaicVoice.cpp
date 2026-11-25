@@ -394,6 +394,7 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
     const double beatDur = 60.0 / ((S && S->bpm == S->bpm && S->bpm > 0) ? S->bpm : 120.0);
     const double duckRel = (S && S->duckRel == S->duckRel && S->duckRel > 0) ? std::min (0.96, std::max (0.12, S->duckRel)) : 0.55;
     const double duckExp = 0.25 + std::min (1.0, std::max (0.0, (S && S->duckShape == S->duckShape) ? S->duckShape : 0.35)) * 1.75;
+    const double duckRate = (S && (S->duckRate == 0.5 || S->duckRate == 0.75)) ? S->duckRate : 1.0;   // SIDECHAIN: every 1/4, 1/8 or 3/16 (as the page's worklet)
     const bool cbOn = S && S->combOn;
     if (cbOn && cbBuf[0].empty()) { for (auto& b : cbBuf) b.assign (4096, 0.f); cbW = 0; cbLp[0] = cbLp[1] = 0; }
     double cbDL = 0, cbDR = 0, cbFb = 0, cbMix = 0, cbA = 0;
@@ -1063,7 +1064,7 @@ void VoiceEngine::process (float* Lch, float* Rch, int frames, double now, doubl
 
         if (duck > 0)
         {
-            const double bp = std::fmod (std::fmod (t - l8anchor, beatDur) + beatDur, beatDur) / beatDur;
+            const double dP = beatDur * duckRate, bp = std::fmod (std::fmod (t - l8anchor, dP) + dP, dP) / dP;
             const double g = 1 - duck * (1 - (bp < 0.03 ? 1 - bp / 0.03 : std::pow (std::min (1.0, (bp - 0.03) / duckRel), duckExp)));
             busL *= g; busR *= g;
         }

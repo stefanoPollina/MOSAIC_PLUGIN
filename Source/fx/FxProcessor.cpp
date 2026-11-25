@@ -43,7 +43,7 @@ void MosaicFxProcessor::installFx (const juce::var& m)
     {   // the synth's voice-bus effects, from the same FX page switches the synth reads (fx.duckOn, fx.combOn, fx.envOn, fx.fgOn)
         const juce::var& f = m["fx"]; auto num = [&f] (const char* k, double d) { const auto& v = f[k]; return v.isDouble() || v.isInt() || v.isInt64() ? (double) v : d; };
         auto& P = p->pre;
-        P.duck = (bool) f["duckOn"] && num ("duckDepth", 0) > 0; P.duckDepth = num ("duckDepth", 0); P.duckRel = num ("duckRelease", 0.55); P.duckShape = num ("duckShape", 0.35);
+        P.duck = (bool) f["duckOn"] && num ("duckDepth", 0) > 0; P.duckDepth = num ("duckDepth", 0); P.duckRel = num ("duckRelease", 0.55); P.duckShape = num ("duckShape", 0.35); P.duckRate = num ("duckRate", 1);
         P.comb = (bool) f["combOn"]; P.combTune = num ("combTune", 0.35); P.combFb = num ("combFb", 0.55); P.combMix = num ("combMix", 0.35);
         P.env = (bool) f["envOn"]; P.envSens = num ("envSens", 0.65); P.envRes = num ("envRes", 0.48); P.envRange = num ("envRange", 0.55);
         P.fg = (bool) f["fgOn"]; P.fgCut = num ("fgCut", 0.42); P.fgRes = num ("fgRes", 0.35); P.fgDepth = num ("fgDepth", 0.85);
