@@ -103,7 +103,7 @@ jobs:
   # ---- the Mac build: Mosaic and Mosaic FX Suite as VST3 + Audio Unit (+ Mosaic's standalone app), Apple Silicon and
   # Intel in one. Its own job: a Mac problem never holds up the Windows release, and on main it adds two zips to it.
   macos:
-    runs-on: macos-14
+    runs-on: macos-latest
     needs: windows
     steps:
       - uses: actions/checkout@v4
