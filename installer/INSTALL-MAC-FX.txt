@@ -1,0 +1,10 @@
+Mosaic FX Suite - macOS (Apple Silicon and Intel, macOS 11 or later)
+
+1. Close your DAW. Copy the plugins into your plug-in folders (Finder: Go > Go to Folder...):
+      "Mosaic FX Suite.vst3"       ->  ~/Library/Audio/Plug-Ins/VST3
+      "Mosaic FX Suite.component"  ->  ~/Library/Audio/Plug-Ins/Components   (Logic, GarageBand)
+2. This early build is not signed by Apple yet, so macOS blocks it until you allow it once.
+   Open Terminal and paste:
+      xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Mosaic FX Suite.vst3" ~/Library/Audio/Plug-Ins/Components/"Mosaic FX Suite.component"
+3. Rescan plugins in your DAW. Ableton Live: Settings > Plug-Ins > Rescan. Logic checks Audio Units on its next start.
+4. Put Mosaic FX Suite on an audio track, a bus or the master.

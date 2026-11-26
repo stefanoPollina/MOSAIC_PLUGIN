@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS the Mac build runs on")
 project(MOSAIC VERSION 0.1.0 LANGUAGES C CXX)   # the one version number: plugin, installer and download names
 
 # Continuum Mosaic as a VST3 instrument (+ standalone app). Mosaic's own page is the interface (WebView2);
@@ -10,6 +11,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")   # no VC++ redistributable needed
     add_compile_options(/bigobj)
+endif()
+
+# formats: VST3 (+ the standalone app) everywhere; on a Mac also Audio Unit, for Logic and GarageBand
+if(APPLE)
+    set(MOSAIC_FORMATS VST3 AU Standalone)
+    set(MOSAIC_FX_FORMATS VST3 AU)
+else()
+    set(MOSAIC_FORMATS VST3 Standalone)
+    set(MOSAIC_FX_FORMATS VST3)
 endif()
 
 set(MOSAIC_JUCE_DIR "" CACHE PATH "Use a local JUCE checkout instead of downloading it")
@@ -42,7 +52,7 @@ juce_add_plugin(MOSAIC
     BUNDLE_ID "com.continuum.mosaic"
     PLUGIN_MANUFACTURER_CODE Cntm
     PLUGIN_CODE Msc1
-    FORMATS VST3 Standalone
+    FORMATS ${MOSAIC_FORMATS}
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
@@ -79,7 +89,7 @@ juce_add_plugin(MOSAIC_FX
     BUNDLE_ID "com.continuum.mosaicfx"
     PLUGIN_MANUFACTURER_CODE Cntm
     PLUGIN_CODE MscF
-    FORMATS VST3
+    FORMATS ${MOSAIC_FX_FORMATS}
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE

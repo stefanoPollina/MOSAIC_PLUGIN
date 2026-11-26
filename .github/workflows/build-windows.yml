@@ -99,3 +99,54 @@ jobs:
           $v = (Select-String -Path CMakeLists.txt -Pattern 'project\(MOSAIC VERSION ([0-9.]+)').Matches[0].Groups[1].Value
           gh release upload "v$v.$env:GITHUB_RUN_NUMBER" distfx\Mosaic-FX-Windows-Setup.exe distfx\Mosaic-FX-Windows-Plugins.zip
 
+
+  # ---- the Mac build: Mosaic and Mosaic FX Suite as VST3 + Audio Unit (+ Mosaic's standalone app), Apple Silicon and
+  # Intel in one. Its own job: a Mac problem never holds up the Windows release, and on main it adds two zips to it.
+  macos:
+    runs-on: macos-14
+    needs: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (downloads JUCE)
+        run: cmake -S . -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build Mosaic
+        run: cmake --build build --config Release --target MOSAIC_VST3 MOSAIC_AU MOSAIC_Standalone -- -quiet
+
+      - name: Build Mosaic FX Suite
+        id: fxmac
+        continue-on-error: true
+        run: cmake --build build --config Release --target MOSAIC_FX_VST3 MOSAIC_FX_AU -- -quiet
+
+      - name: Package
+        run: |
+          A=build/MOSAIC_artefacts/Release
+          mkdir -p "dist/Mosaic (macOS)"
+          cp -R "$A/VST3/Mosaic.vst3" "$A/AU/Mosaic.component" "$A/Standalone/Mosaic.app" "dist/Mosaic (macOS)/"
+          cp installer/INSTALL-MAC.txt docs/Mosaic-Manual.pdf "dist/Mosaic (macOS)/"
+          for b in "dist/Mosaic (macOS)"/*.vst3 "dist/Mosaic (macOS)"/*.component "dist/Mosaic (macOS)"/*.app; do codesign --force --deep --sign - "$b"; done
+          (cd dist && ditto -c -k --keepParent "Mosaic (macOS)" Mosaic-macOS.zip)
+          if [ "${{ steps.fxmac.outcome }}" = "success" ]; then
+            F=build/MOSAIC_FX_artefacts/Release
+            mkdir -p "dist/Mosaic FX Suite (macOS)"
+            cp -R "$F/VST3/Mosaic FX Suite.vst3" "$F/AU/Mosaic FX Suite.component" "dist/Mosaic FX Suite (macOS)/"
+            cp installer/INSTALL-MAC-FX.txt "dist/Mosaic FX Suite (macOS)/"
+            for b in "dist/Mosaic FX Suite (macOS)"/*.vst3 "dist/Mosaic FX Suite (macOS)"/*.component; do codesign --force --deep --sign - "$b"; done
+            (cd dist && ditto -c -k --keepParent "Mosaic FX Suite (macOS)" Mosaic-FX-macOS.zip)
+          fi
+          ls -la dist
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mosaic-macos
+          path: dist/*.zip
+
+      - name: Add the Mac downloads to the Release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(sed -n 's/^project(MOSAIC VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          gh release upload "v$v.$GITHUB_RUN_NUMBER" dist/*.zip

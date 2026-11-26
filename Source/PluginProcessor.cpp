@@ -17,7 +17,11 @@ std::string waveKeyFor (const mosaic::TableSettings& S)
 
 juce::File MosaicProcessor::dataDir()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Mosaic");
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+#if JUCE_MAC
+        .getChildFile ("Application Support")   // ~/Library/Application Support/Mosaic
+#endif
+        .getChildFile ("Mosaic");
 }
 
 MosaicProcessor::MosaicProcessor()

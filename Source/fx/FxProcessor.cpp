@@ -4,7 +4,11 @@
 
 namespace { mosaic::json::Value toValue (const juce::var& v) { return mosaic::json::parse (juce::JSON::toString (v, true).toStdString()); } }
 
-juce::File MosaicFxProcessor::dataDir() { return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Mosaic FX"); }
+juce::File MosaicFxProcessor::dataDir() { return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+#if JUCE_MAC
+        .getChildFile ("Application Support")   // ~/Library/Application Support/Mosaic FX
+#endif
+        .getChildFile ("Mosaic FX"); }
 
 MosaicFxProcessor::MosaicFxProcessor()
     : AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true).withOutput ("Output", juce::AudioChannelSet::stereo(), true))
