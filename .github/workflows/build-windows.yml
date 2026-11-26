@@ -119,6 +119,14 @@ jobs:
         continue-on-error: true
         run: cmake --build build --config Release --target MOSAIC_FX_VST3 MOSAIC_FX_AU -- -quiet
 
+      - name: Check (both chips, and Apple's Audio Unit validator)
+        continue-on-error: true
+        run: |
+          lipo -archs build/MOSAIC_artefacts/Release/VST3/Mosaic.vst3/Contents/MacOS/Mosaic
+          mkdir -p ~/Library/Audio/Plug-Ins/Components && cp -R build/MOSAIC_artefacts/Release/AU/Mosaic.component ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true; sleep 2
+          auval -v aumu Msc1 Cntm | tail -25
+
       - name: Package
         run: |
           A=build/MOSAIC_artefacts/Release
